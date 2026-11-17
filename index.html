@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CF Server Monitor</title>
+    <meta name="description" content="A clean server monitor dashboard powered by CF-Server-Monitor." />
+    <meta name="theme-color" content="hsl(0 0% 98%)" />
+    <script>
+      // Initialize theme class before first paint to prevent FOUC
+      try {
+        var storageKey = "vite-ui-theme"
+        var theme = localStorage.getItem(storageKey)
+        if (theme === "system" || !theme) {
+          theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+        }
+        document.documentElement.classList.add(theme)
+      } catch (e) {
+        document.documentElement.classList.add("light")
+      }
+    </script>
+    <style>
+      html:not(.dark):not(.light) * {
+        visibility: hidden;
+      }
+
+      :root {
+        color-scheme: light;
+        --bg: #fafafa;
+      }
+
+      html.dark {
+        color-scheme: dark;
+        --bg: #171412;
+      }
+
+      html.light {
+        color-scheme: light;
+        --bg: #fafafa;
+      }
+
+      html {
+        background-color: var(--bg);
+      }
+
+      body {
+        background-color: var(--bg);
+      }
+
+      #root {
+        visibility: hidden;
+      }
+
+      #root.loaded {
+        visibility: visible;
+        animation: fadein 0.2s;
+      }
+
+      @keyframes fadein {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+    </style>
+    <script>
+      ;(function () {
+        var storageKey = "vite-ui-theme"
+        var theme = localStorage.getItem(storageKey) || "system"
+        var root = document.documentElement
+
+        function updateThemeColor(isDark) {
+          var themeColor = isDark ? "hsl(30 15% 8%)" : "hsl(0 0% 98%)"
+          var meta = document.querySelector('meta[name="theme-color"]')
+          if (meta) meta.setAttribute("content", themeColor)
+        }
+
+        function setTheme(newTheme) {
+          root.classList.remove("light", "dark")
+          root.classList.add(newTheme)
+          updateThemeColor(newTheme === "dark")
+        }
+
+        if (theme === "system") {
+          var systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+          setTheme(systemTheme)
+          window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) {
+            if ((localStorage.getItem(storageKey) || "system") === "system") {
+              setTheme(e.matches ? "dark" : "light")
+            }
+          })
+        } else {
+          setTheme(theme)
+        }
+
+        function markLoaded() {
+          var el = document.getElementById("root")
+          if (el && !el.classList.contains("loaded")) {
+            requestAnimationFrame(function () {
+              requestAnimationFrame(function () {
+                el.classList.add("loaded")
+              })
+            })
+          }
+        }
+
+        if (document.readyState === "complete") {
+          markLoaded()
+        } else {
+          window.addEventListener("load", markLoaded)
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

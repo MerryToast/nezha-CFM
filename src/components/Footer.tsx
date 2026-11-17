@@ -1,0 +1,52 @@
+import { useCfsm } from "@/hooks/use-cfsm"
+import React from "react"
+import { useTranslation } from "react-i18next"
+
+const Footer: React.FC = () => {
+  const { t } = useTranslation()
+  const { config } = useCfsm()
+  const isMac = typeof navigator !== "undefined" && /macintosh|mac os x/i.test(navigator.userAgent)
+
+  return (
+    <footer className="mx-auto w-full max-w-5xl px-4 lg:px-0 pb-4 server-footer">
+      <section className="flex flex-col">
+        <section className="mt-1 flex items-center sm:flex-row flex-col justify-between gap-2 text-[13px] font-light tracking-tight text-neutral-600/60 dark:text-neutral-300/60 server-footer-name">
+          <div className="flex items-center gap-1">
+            <p>
+              Powered by{" "}
+              <a
+                href="https://github.com/huilang-me/CF-Server-Monitor/"
+                target="_blank"
+                rel="noopener noreferrer"
+                title={config?.version ? `CF-Server-Monitor ${config.version}` : "CF-Server-Monitor"}
+                className="hover:underline"
+              >
+                CF Server Monitor
+              </a>
+            </p>
+          </div>
+          <div className="server-footer-theme flex flex-col items-center sm:items-end">
+            <p className="mt-1 text-[13px] font-light tracking-tight text-neutral-600/60 dark:text-neutral-300/60">
+              <kbd className="pointer-events-none mx-1 inline-flex h-4 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
+                {isMac ? <span className="text-xs">⌘</span> : "Ctrl "}K
+              </kbd>
+            </p>
+            <section>
+              {t("footer.themeBy")}
+              <a
+                href="https://github.com/BITJEBE/nezha-BITJEBE"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                nezha-BITJEBE
+              </a>
+            </section>
+          </div>
+        </section>
+      </section>
+    </footer>
+  )
+}
+
+export default Footer

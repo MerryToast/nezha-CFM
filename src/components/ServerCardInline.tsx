@@ -1,0 +1,186 @@
+import { getSiteSysConfigByIndex } from "@/api/cfsm-client"
+import ServerFlag from "@/components/ServerFlag"
+import ServerUsageBar from "@/components/ServerUsageBar"
+import TrafficBar from "@/components/TrafficBar"
+import { useCfsm } from "@/hooks/use-cfsm"
+import { formatBytes } from "@/lib/format"
+import { GetOsName, OsIcon } from "@/lib/logo-class"
+import { calcTrafficUsed, cn, formatNezhaInfo, parsePublicNote } from "@/lib/utils"
+import { NezhaServer } from "@/types/nezha-api"
+import { useTranslation } from "react-i18next"
+import { useNavigate } from "react-router-dom"
+
+import PlanInfo from "./PlanInfo"
+import BillingInfo from "./billingInfo"
+import { Card } from "./ui/card"
+import { Separator } from "./ui/separator"
+
+export default function ServerCardInline({ now, serverInfo }: { now: number; serverInfo: NezhaServer }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { themeOptions } = useCfsm()
+  const {
+    name,
+    country_code,
+    online,
+    cpu,
+    up,
+    down,
+    mem,
+    stg,
+    platform,
+    uptime,
+    net_in_transfer,
+    net_out_transfer,
+    net_rx_monthly,
+    net_tx_monthly,
+    public_note,
+    traffic_limit,
+    traffic_limit_type,
+    traffic_reset_day,
+  } = formatNezhaInfo(now, serverInfo)
+
+  const cardClick = () => {
+    sessionStorage.setItem("fromMainPage", "true")
+    const query = serverInfo.apiIndex ? `?apiIndex=${serverInfo.apiIndex}` : ""
+    navigate(`/server/${encodeURIComponent(serverInfo.id)}${query}`)
+  }
+
+  const showFlag = true
+  const customBackgroundImage =
+    typeof themeOptions.custom_background_image === "string" && themeOptions.custom_background_image.trim()
+      ? themeOptions.custom_background_image.trim()
+      : undefined
+  const resolvedShowTf =
+    serverInfo.sysConfig?.show_tf ?? getSiteSysConfigByIndex(serverInfo.apiIndex ?? 0)?.show_tf ?? true
+  const showTrafficBar =
+    resolvedShowTf !== false && themeOptions.show_traffic_bar !== false && traffic_limit > 0
+
+  const parsedData = parsePublicNote(public_note)
+
+  return online ? (
+    <section>
+      <Card
+        className={cn(
+          "flex items-center lg:flex-row justify-start gap-3 p-3 md:px-5 cursor-pointer hover:bg-accent/50 transition-colors min-w-[900px] w-full",
+          {
+            "bg-card/70": customBackgroundImage,
+          },
+        )}
+        onClick={cardClick}
+      >
+        <section className="grid items-center gap-2 lg:w-36" style={{ gridTemplateColumns: "auto auto 1fr" }}>
+          <span className="h-2 w-2 shrink-0 rounded-full bg-green-500 self-center"></span>
+          <div className={cn("flex items-center justify-center", showFlag ? "min-w-[17px]" : "min-w-0")}>
+            {showFlag ? <ServerFlag country_code={country_code} apiIndex={serverInfo.apiIndex} /> : null}
+          </div>
+          <div className="relative w-28 flex flex-col">
+            <p className={cn("break-normal font-bold tracking-tight", showFlag ? "text-xs " : "text-sm")}>{name}</p>
+            {parsedData?.billingDataMod && <BillingInfo parsedData={parsedData} />}
+          </div>
+        </section>
+        <Separator orientation="vertical" className="h-8 mx-0 ml-2" />
+        <div className="flex flex-col gap-1 flex-1">
+          <section className="grid grid-cols-9 items-center gap-3 flex-1 tabular-nums">
+            <div className="items-center flex flex-row gap-2 whitespace-nowrap">
+              <div className="text-xs font-semibold">
+                <OsIcon platform={platform} apiIndex={serverInfo.apiIndex} />
+              </div>
+              <div className="flex w-14 flex-col">
+                <p className="text-xs text-muted-foreground">{t("serverCard.system")}</p>
+                <div className="flex items-center text-[10.5px] font-semibold truncate">{GetOsName(platform)}</div>
+              </div>
+            </div>
+            <div className="flex w-20 flex-col">
+              <p className="text-xs text-muted-foreground">{t("serverCard.uptime")}</p>
+              <div className="flex items-center text-xs font-semibold">
+                {uptime / 86400 >= 1
+                  ? `${(uptime / 86400).toFixed(0)} ${t("serverCard.days")}`
+                  : `${(uptime / 3600).toFixed(0)} ${t("serverCard.hours")}`}
+              </div>
+            </div>
+            <div className="flex w-14 flex-col">
+              <p className="text-xs text-muted-foreground">CPU</p>
+              <div className="flex items-center text-xs font-semibold">{cpu.toFixed(2)}%</div>
+              <ServerUsageBar value={cpu} />
+            </div>
+            <div className="flex w-14 flex-col">
+              <p className="text-xs text-muted-foreground">{t("serverCard.mem")}</p>
+              <div className="flex items-center text-xs font-semibold">{mem.toFixed(2)}%</div>
+              <ServerUsageBar value={mem} />
+            </div>
+            <div className="flex w-14 flex-col">
+              <p className="text-xs text-muted-foreground">{t("serverCard.stg")}</p>
+              <div className="flex items-center text-xs font-semibold">{stg.toFixed(2)}%</div>
+              <ServerUsageBar value={stg} />
+            </div>
+            <div className="flex w-16 flex-col">
+              <p className="text-xs text-muted-foreground">{t("serverCard.upload")}</p>
+              <div className="flex items-center text-xs font-semibold">
+                {up >= 1024 ? `${(up / 1024).toFixed(2)}G/s` : up >= 1 ? `${up.toFixed(2)}M/s` : `${(up * 1024).toFixed(2)}K/s`}
+              </div>
+            </div>
+            <div className="flex w-16 flex-col">
+              <p className="text-xs text-muted-foreground">{t("serverCard.download")}</p>
+              <div className="flex items-center text-xs font-semibold">
+                {down >= 1024 ? `${(down / 1024).toFixed(2)}G/s` : down >= 1 ? `${down.toFixed(2)}M/s` : `${(down * 1024).toFixed(2)}K/s`}
+              </div>
+            </div>
+            <div className="flex w-20 flex-col">
+              <p className="text-xs text-muted-foreground">{t("serverCard.totalUpload")}</p>
+              <div className="flex items-center text-xs font-semibold">{formatBytes(net_out_transfer)}</div>
+            </div>
+            <div className="flex w-20 flex-col">
+              <p className="text-xs text-muted-foreground">{t("serverCard.totalDownload")}</p>
+              <div className="flex items-center text-xs font-semibold">{formatBytes(net_in_transfer)}</div>
+            </div>
+          </section>
+          {showTrafficBar && (
+            <TrafficBar
+              used={calcTrafficUsed(net_tx_monthly, net_rx_monthly, traffic_limit_type)}
+              limit={traffic_limit}
+              resetDay={traffic_reset_day}
+              limitType={traffic_limit_type}
+            />
+          )}
+          {parsedData?.planDataMod && (
+            <PlanInfo
+              parsedData={parsedData}
+              serverSysConfig={serverInfo.sysConfig}
+              apiIndex={serverInfo.apiIndex}
+            />
+          )}
+        </div>
+      </Card>
+    </section>
+  ) : (
+    <Card
+      className={cn(
+        "flex min-h-[61px] min-w-[900px] items-center justify-start p-3 md:px-5 flex-row cursor-pointer hover:bg-accent/50 transition-colors",
+        {
+          "bg-card/70": customBackgroundImage,
+        },
+      )}
+      onClick={cardClick}
+    >
+      <section className="grid items-center gap-2 w-40" style={{ gridTemplateColumns: "auto auto 1fr" }}>
+        <span className="h-2 w-2 shrink-0 rounded-full bg-red-500 self-center"></span>
+        <div className={cn("flex items-center justify-center", showFlag ? "min-w-[17px]" : "min-w-0")}>
+          {showFlag ? <ServerFlag country_code={country_code} apiIndex={serverInfo.apiIndex} /> : null}
+        </div>
+        <div className="relative flex flex-col">
+          <p className={cn("break-normal font-bold w-28 tracking-tight", showFlag ? "text-xs" : "text-sm")}>{name}</p>
+          {parsedData?.billingDataMod && <BillingInfo parsedData={parsedData} />}
+        </div>
+      </section>
+      <Separator orientation="vertical" className="h-8 ml-3 lg:ml-1 mr-3" />
+      {parsedData?.planDataMod && (
+        <PlanInfo
+          parsedData={parsedData}
+          serverSysConfig={serverInfo.sysConfig}
+          apiIndex={serverInfo.apiIndex}
+        />
+      )}
+    </Card>
+  )
+}

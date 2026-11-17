@@ -1,0 +1,75 @@
+name: Build and Publish dist Branch
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-dist-branch
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Save source commit message
+        run: git log -1 --pretty=%B > "${RUNNER_TEMP}/commit-msg.txt"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Build production bundle
+        env:
+          API_BASE: ${{ secrets.API_BASE }}
+          TITLE: ${{ secrets.TITLE }}
+          BACKGROUND_IMAGE: ${{ secrets.BACKGROUND_IMAGE }}
+          CSP_API: ${{ secrets.CSP_API }}
+          CSP_STATIC: ${{ secrets.CSP_STATIC }}
+        run: npm run build
+
+      - name: Append build artifacts to dist branch
+        run: |
+          set -e
+          WORKDIR="${RUNNER_TEMP}/dist-worktree"
+          git fetch origin dist:dist || true
+
+          if git show-ref --verify --quiet refs/heads/dist; then
+            git worktree add "$WORKDIR" dist
+          else
+            git worktree add --orphan -b dist "$WORKDIR"
+          fi
+
+          cd "$WORKDIR"
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+
+          find . -maxdepth 1 ! -name '.' ! -name '.git' -exec rm -rf {} +
+          cp -R "${GITHUB_WORKSPACE}/dist/." .
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No build artifact changes to commit."
+            exit 0
+          fi
+
+          git commit -F "${RUNNER_TEMP}/commit-msg.txt"
+          git push origin dist
