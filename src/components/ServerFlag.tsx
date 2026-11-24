@@ -3,6 +3,38 @@ import { cn } from "@/lib/utils"
 import getUnicodeFlagIcon from "country-flag-icons/unicode"
 import { useEffect, useState } from "react"
 
+let cachedEmojiFlagSupport: boolean | null = null
+
+function detectEmojiFlagSupport(): boolean {
+  if (cachedEmojiFlagSupport !== null) return cachedEmojiFlagSupport
+  if (typeof document === "undefined") return false
+  try {
+    const canvas = document.createElement("canvas")
+    const ctx = canvas.getContext("2d")
+    if (!ctx) {
+      cachedEmojiFlagSupport = false
+      return false
+    }
+    ctx.fillStyle = "#000"
+    ctx.textBaseline = "top"
+    ctx.font = "32px Arial"
+    ctx.fillText("🇺🇸", 0, 0)
+    cachedEmojiFlagSupport = ctx.getImageData(16, 16, 1, 1).data[3] !== 0
+  } catch {
+    cachedEmojiFlagSupport = false
+  }
+  return cachedEmojiFlagSupport
+}
+
+function safeUnicodeFlagIcon(code: string): string | null {
+  try {
+    const icon = getUnicodeFlagIcon(code)
+    return icon || null
+  } catch {
+    return null
+  }
+}
+
 export default function ServerFlag({
   country_code,
   apiIndex = 0,
@@ -12,40 +44,38 @@ export default function ServerFlag({
   apiIndex?: number
   className?: string
 }) {
-  const [supportsEmojiFlags, setSupportsEmojiFlags] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
 
   const forceUseSvgFlag = (window as unknown as Record<string, unknown>).ForceUseSvgFlag === true
-  const code = String(country_code || "").trim().toLowerCase()
+  const rawCode = String(country_code || "").trim()
+  const code = rawCode.toLowerCase()
+  const isIsoAlpha2 = /^[a-z]{2}$/.test(code) && code !== "xx" && code !== "un"
 
   useEffect(() => {
     setImgFailed(false)
   }, [code])
 
-  useEffect(() => {
-    if (forceUseSvgFlag) {
-      setSupportsEmojiFlags(false)
-      return
-    }
-    const canvas = document.createElement("canvas")
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
-    ctx.fillStyle = "#000"
-    ctx.textBaseline = "top"
-    ctx.font = "32px Arial"
-    ctx.fillText("🇺🇸", 0, 0)
-    const support = ctx.getImageData(16, 16, 1, 1).data[3] !== 0
-    setSupportsEmojiFlags(support)
-  }, [forceUseSvgFlag])
+  if (!code || code === "xx" || code === "un") return null
 
-  if (!code || code === "xx") return null
-
-  if (!forceUseSvgFlag && supportsEmojiFlags) {
+  if (!isIsoAlpha2) {
+    if (!/^[a-z0-9_-]{1,6}$/i.test(rawCode)) return null
     return (
-      <span className={cn("text-[12px] text-muted-foreground leading-none", className)}>
-        {getUnicodeFlagIcon(code)}
+      <span
+        className={cn(
+          "inline-flex items-center justify-center rounded px-1 py-0.5 text-[9px] font-semibold uppercase leading-none bg-muted text-muted-foreground",
+          className,
+        )}
+      >
+        {rawCode.toUpperCase()}
       </span>
     )
+  }
+
+  if (!forceUseSvgFlag && detectEmojiFlagSupport()) {
+    const unicodeFlag = safeUnicodeFlagIcon(code)
+    if (unicodeFlag) {
+      return <span className={cn("text-[12px] text-muted-foreground leading-none", className)}>{unicodeFlag}</span>
+    }
   }
 
   if (imgFailed) {

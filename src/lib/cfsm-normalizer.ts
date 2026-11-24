@@ -7,8 +7,12 @@ import {
   GpuDeviceInfo,
   ProbeMetricValue,
 } from "@/types/cfsm"
-import { NezhaServer } from "@/types/nezha-api"
+import { BillingData, NezhaServer, PlanData, PublicNoteData } from "@/types/nezha-api"
 import dayjs from "dayjs"
+
+export function makeServerUid(apiIndex: number | undefined, id: string): string {
+  return `${apiIndex ?? 0}:${id}`
+}
 
 export const ONLINE_THRESHOLD_MS = 300_000
 export const KB = 1024
@@ -406,12 +410,12 @@ function normalizeReachabilityFlag(value: unknown): string {
   return text && text !== "0" && text !== "false" && text !== "null" ? "1" : "0"
 }
 
-export function buildPublicNoteFromCfsm(
+export function buildPublicNoteObjectFromCfsm(
   server: CfsmServer,
   sysConfig?: CfsmSysConfig,
   themeOptions?: CfsmThemeOptions,
   now = Date.now(),
-): string {
+): PublicNoteData {
   const showPrice = sysConfig?.show_price !== false
   const showExpire = sysConfig?.show_expire !== false
   const tagMeta = parseTagMetadata(server.tags || "")
@@ -439,31 +443,43 @@ export function buildPublicNoteFromCfsm(
   const trafficLimitBytes = parseTrafficLimitToBytes(server.traffic_limit)
   const hasBilling = (showExpire && Boolean(effectiveExpire)) || (showPrice && Boolean(amount))
 
-  const note = {
-    billingDataMod: hasBilling
-      ? {
-          startDate: "",
-          endDate: showExpire ? effectiveExpire : "",
-          autoRenewal: autoRenewal ? "1" : "0",
-          cycle: cycleInfo.label,
-          amount,
-          currency: tagMeta.currency || server.currency || "",
-        }
-      : null,
-    planDataMod: {
-      bandwidth: "",
-      trafficVol: trafficLimitBytes > 0 ? formatTrafficTag(trafficLimitBytes) : "",
-      trafficType: server.traffic_calc_type || "",
-      IPv4: normalizeReachabilityFlag(server.ip_v4),
-      IPv6: normalizeReachabilityFlag(server.ip_v6),
-      networkRoute: "",
-      extra: tagMeta.text,
-    },
+  const billingDataMod: BillingData | undefined = hasBilling
+    ? {
+        startDate: "",
+        endDate: showExpire ? effectiveExpire : "",
+        autoRenewal: autoRenewal ? "1" : "0",
+        cycle: cycleInfo.label,
+        amount,
+        currency: tagMeta.currency || server.currency || "",
+      }
+    : undefined
+
+  const planDataMod: PlanData = {
+    bandwidth: "",
+    trafficVol: trafficLimitBytes > 0 ? formatTrafficTag(trafficLimitBytes) : "",
+    trafficType: server.traffic_calc_type || "",
+    IPv4: normalizeReachabilityFlag(server.ip_v4),
+    IPv6: normalizeReachabilityFlag(server.ip_v6),
+    networkRoute: "",
+    extra: tagMeta.text,
   }
 
   // Keep resetDay resolved cleanly when building server
   void themeOptions
-  return JSON.stringify(note)
+  return { billingDataMod, planDataMod }
+}
+
+export function buildPublicNoteFromCfsm(
+  server: CfsmServer,
+  sysConfig?: CfsmSysConfig,
+  themeOptions?: CfsmThemeOptions,
+  now = Date.now(),
+): string {
+  const obj = buildPublicNoteObjectFromCfsm(server, sysConfig, themeOptions, now)
+  return JSON.stringify({
+    billingDataMod: obj.billingDataMod ?? null,
+    planDataMod: obj.planDataMod ?? null,
+  })
 }
 
 function formatTrafficTag(bytes: number): string {
@@ -488,16 +504,20 @@ export function cfsmServerToNezhaServer(
   const lastUpdatedMs = normalizeTimestampMs(server.last_updated ?? server.last_time ?? server.timestamp, 0)
   const bootTimeMs = parseBootTimeMs(server.boot_time)
   const bootTimeSec = bootTimeMs ? Math.floor(bootTimeMs / 1000) : 0
-  const uptimeSec =
-    server.uptime !== undefined && server.uptime !== null && Number(server.uptime) > 0
-      ? Math.floor(Number(server.uptime))
-      : bootTimeMs && now > bootTimeMs
-        ? Math.floor((now - bootTimeMs) / 1000)
-        : 0
+  const online = isCfsmServerOnline(server, now)
+
+  let uptimeSec = 0
+  if (online && server._uptime_base_sec !== undefined && server._uptime_base_ts) {
+    uptimeSec = server._uptime_base_sec + Math.max(0, Math.floor((now - server._uptime_base_ts) / 1000))
+  } else if (server.uptime !== undefined && server.uptime !== null && Number.isFinite(Number(server.uptime)) && Number(server.uptime) > 0) {
+    uptimeSec = Math.floor(Number(server.uptime))
+  } else if (bootTimeMs) {
+    const refTs = online ? now : lastUpdatedMs
+    uptimeSec = refTs > bootTimeMs ? Math.floor((refTs - bootTimeMs) / 1000) : 0
+  }
 
   const [load1, load5, load15] = parseLoadAvg(server.load_avg ?? server.load)
   const gpuDevices = parseGpuInfo(server.gpu_info)
-  const online = isCfsmServerOnline(server, now)
 
   const memTotalBytes = parseMemoryOrDiskToBytes(server.ram_total)
   const memUsedBytes = parseMemoryOrDiskToBytes(server.ram_used)
@@ -508,26 +528,33 @@ export function cfsmServerToNezhaServer(
 
   const netRx = parseFiniteNumber(server.net_rx, 0)
   const netTx = parseFiniteNumber(server.net_tx, 0)
+  // Monthly quota must never fall back to cumulative boot traffic (net_rx / net_tx)
   const netRxMonthly =
     server.net_rx_monthly !== undefined && server.net_rx_monthly !== null
       ? parseFiniteNumber(server.net_rx_monthly, 0)
-      : netRx
+      : 0
   const netTxMonthly =
     server.net_tx_monthly !== undefined && server.net_tx_monthly !== null
       ? parseFiniteNumber(server.net_tx_monthly, 0)
-      : netTx
+      : 0
 
   const trafficLimitBytes = parseTrafficLimitToBytes(server.traffic_limit)
   const trafficCalcType = normalizeTrafficCalcType(server.traffic_calc_type)
   const trafficResetDay = resolveTrafficResetDay(server, themeOptions)
   const countryCode = server.region ? String(server.region).trim().toLowerCase() : ""
+  const parsedNote = buildPublicNoteObjectFromCfsm(server, sysConfig, themeOptions, now)
 
   return {
+    uid: makeServerUid(server.apiIndex, server.id),
     uuid: server.id,
     id: server.id,
     name: server.name || server.id,
     server_group: server.server_group || "",
-    public_note: buildPublicNoteFromCfsm(server, sysConfig, themeOptions, now),
+    public_note: JSON.stringify({
+      billingDataMod: parsedNote.billingDataMod ?? null,
+      planDataMod: parsedNote.planDataMod ?? null,
+    }),
+    parsed_note: parsedNote,
     last_active: lastUpdatedMs ? new Date(lastUpdatedMs).toISOString() : "0000-00-00T00:00:00Z",
     last_updated: lastUpdatedMs,
     country_code: countryCode === "xx" ? "" : countryCode,
@@ -604,10 +631,27 @@ export function cfsmServerToNezhaServer(
   }
 }
 
+const REPORT_LEVEL_KEYS = [
+  "processes",
+  "tcp_conn",
+  "udp_conn",
+  "disk_total",
+  "disk_used",
+  "load_avg",
+  "load",
+  "net_rx",
+  "net_tx",
+  "ping_ct",
+  "ping_cu",
+  "ping_cm",
+  "ping_bd",
+] as const
+
 /**
  * Incrementally merge a WebSocket batchUpdate sample into an existing CfsmServer.
- * Undefined keys are skipped so report-level fields (disk, gpu_info, tags, ping, etc.)
- * are preserved across high-frequency samples.
+ * Undefined keys are skipped so report-level fields (gpu_info, tags, ping, etc.)
+ * are preserved across high-frequency samples, while full report frames without
+ * disk IO clear stale idle disk metrics.
  */
 export function mergeBatchSampleIntoServer(
   prev: CfsmServer,
@@ -616,19 +660,47 @@ export function mergeBatchSampleIntoServer(
   reportTs: number,
 ): CfsmServer {
   const next: CfsmServer = { ...prev }
-  for (const [key, value] of Object.entries(sampleData)) {
+  const rawSample = sampleData as Record<string, unknown>
+
+  for (const [key, value] of Object.entries(rawSample)) {
+    if (key === "disk") continue
     if (value !== undefined) {
       ;(next as unknown as Record<string, unknown>)[key] = value
     }
   }
-  const resolvedReportTs = normalizeTimestampMs(
-    sampleData.last_updated ?? reportTs,
-    prev.last_updated || Date.now(),
+
+  if ("disk" in rawSample) {
+    next.disk = isValidDiskIo(rawSample.disk) ? (rawSample.disk as DiskIoMetrics) : undefined
+  } else if (REPORT_LEVEL_KEYS.some((k) => rawSample[k] !== undefined)) {
+    next.disk = undefined
+  }
+
+  const prevLastUpdated = normalizeTimestampMs(prev.last_updated ?? prev.last_time ?? prev.timestamp, 0)
+  const candidateTs = normalizeTimestampMs(
+    sampleData.last_updated ?? (reportTs > 0 ? reportTs : sampleTs),
+    0,
   )
-  next.last_updated = resolvedReportTs
-  next.sample_timestamp = normalizeTimestampMs(sampleTs, resolvedReportTs)
-  next.timestamp = resolvedReportTs
-  next.online = true
+  const resolvedReportTs = Math.max(prevLastUpdated, candidateTs)
+  if (resolvedReportTs > 0) {
+    next.last_updated = resolvedReportTs
+    next.timestamp = resolvedReportTs
+  }
+  const resolvedSampleTs = normalizeTimestampMs(sampleTs, resolvedReportTs)
+  if (resolvedSampleTs > 0) {
+    next.sample_timestamp = resolvedSampleTs
+  }
+
+  if (
+    sampleData.uptime !== undefined &&
+    sampleData.uptime !== null &&
+    Number.isFinite(Number(sampleData.uptime)) &&
+    Number(sampleData.uptime) > 0
+  ) {
+    next._uptime_base_sec = Math.floor(Number(sampleData.uptime))
+    next._uptime_base_ts = resolvedReportTs > 0 ? resolvedReportTs : Date.now()
+  }
+
+  next.online = isCfsmServerOnline(next)
   return next
 }
 

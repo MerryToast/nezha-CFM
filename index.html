@@ -6,19 +6,6 @@
     <title>CF Server Monitor</title>
     <meta name="description" content="A clean server monitor dashboard powered by CF-Server-Monitor." />
     <meta name="theme-color" content="hsl(0 0% 98%)" />
-    <script>
-      // Initialize theme class before first paint to prevent FOUC
-      try {
-        var storageKey = "vite-ui-theme"
-        var theme = localStorage.getItem(storageKey)
-        if (theme === "system" || !theme) {
-          theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-        }
-        document.documentElement.classList.add(theme)
-      } catch (e) {
-        document.documentElement.classList.add("light")
-      }
-    </script>
     <style>
       html:not(.dark):not(.light) * {
         visibility: hidden;
@@ -68,8 +55,19 @@
     <script>
       ;(function () {
         var storageKey = "vite-ui-theme"
-        var theme = localStorage.getItem(storageKey) || "system"
         var root = document.documentElement
+
+        function normalizeStoredTheme(val) {
+          return val === "dark" || val === "light" || val === "system" ? val : "system"
+        }
+
+        function getSystemTheme() {
+          try {
+            return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+          } catch (e) {
+            return "light"
+          }
+        }
 
         function updateThemeColor(isDark) {
           var themeColor = isDark ? "hsl(30 15% 8%)" : "hsl(0 0% 98%)"
@@ -78,21 +76,41 @@
         }
 
         function setTheme(newTheme) {
+          var safeTheme = newTheme === "dark" || newTheme === "light" ? newTheme : "light"
           root.classList.remove("light", "dark")
-          root.classList.add(newTheme)
-          updateThemeColor(newTheme === "dark")
+          root.classList.add(safeTheme)
+          updateThemeColor(safeTheme === "dark")
         }
 
-        if (theme === "system") {
-          var systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-          setTheme(systemTheme)
-          window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) {
-            if ((localStorage.getItem(storageKey) || "system") === "system") {
-              setTheme(e.matches ? "dark" : "light")
+        var storedTheme = "system"
+        try {
+          storedTheme = normalizeStoredTheme(localStorage.getItem(storageKey))
+        } catch (e) {
+          storedTheme = "system"
+        }
+
+        if (storedTheme === "system") {
+          setTheme(getSystemTheme())
+          try {
+            var media = window.matchMedia("(prefers-color-scheme: dark)")
+            if (media && media.addEventListener) {
+              media.addEventListener("change", function (e) {
+                var current = "system"
+                try {
+                  current = normalizeStoredTheme(localStorage.getItem(storageKey))
+                } catch (err) {
+                  current = "system"
+                }
+                if (current === "system") {
+                  setTheme(e.matches ? "dark" : "light")
+                }
+              })
             }
-          })
+          } catch (e) {
+            // ignore
+          }
         } else {
-          setTheme(theme)
+          setTheme(storedTheme)
         }
 
         function markLoaded() {

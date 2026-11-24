@@ -5,10 +5,10 @@ import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
+import { sanitizeSafeUrl } from "@/lib/security"
 import { cn } from "@/lib/utils"
 import NumberFlow, { NumberFlowGroup } from "@number-flow/react"
 import { Activity, ImageMinus, LogIn, SlidersHorizontal } from "lucide-react"
-import { DateTime } from "luxon"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
@@ -22,16 +22,30 @@ type CustomLink = {
   name: string
 }
 
+function sanitizeCustomLinkList(items: unknown[]): CustomLink[] {
+  const result: CustomLink[] = []
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue
+    const record = item as Record<string, unknown>
+    const name = typeof record.name === "string" ? record.name.trim() : ""
+    const safeLink = sanitizeSafeUrl(record.link, { allowRelative: true, allowHash: true })
+    if (name && safeLink) {
+      result.push({ name, link: safeLink })
+    }
+  }
+  return result
+}
+
 function parseCustomLinks(raw: unknown): CustomLink[] {
   if (!raw) return []
   if (Array.isArray(raw)) {
-    return raw.filter((item): item is CustomLink => Boolean(item && typeof item === "object" && item.link && item.name))
+    return sanitizeCustomLinkList(raw)
   }
   if (typeof raw === "string" && raw.trim()) {
     try {
       const parsed = JSON.parse(raw)
       if (Array.isArray(parsed)) {
-        return parsed.filter((item): item is CustomLink => Boolean(item && typeof item === "object" && item.link && item.name))
+        return sanitizeCustomLinkList(parsed)
       }
     } catch {
       return []
@@ -49,14 +63,11 @@ function Header() {
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
 
   const siteName = config?.site_title || "CF Server Monitor"
-  const customLogo = typeof themeOptions.custom_logo === "string" ? themeOptions.custom_logo.trim() : ""
+  const customLogo = sanitizeSafeUrl(themeOptions.custom_logo, { allowHash: false })
   const customDesc =
     (typeof themeOptions.site_desc === "string" && themeOptions.site_desc.trim()) ||
     "Server Status"
-  const customMobileBackgroundImage =
-    typeof themeOptions.custom_mobile_background_image === "string" && themeOptions.custom_mobile_background_image.trim()
-      ? themeOptions.custom_mobile_background_image.trim()
-      : undefined
+  const customMobileBackgroundImage = sanitizeSafeUrl(themeOptions.custom_mobile_background_image, { allowHash: false }) || undefined
   const customBackgroundImage = backgroundImage
 
   useEffect(() => {
@@ -193,21 +204,22 @@ function Links({ links }: { links: CustomLink[] }) {
   )
 }
 
+function getCurrentClock() {
+  const d = new Date()
+  return {
+    hh: d.getHours(),
+    mm: d.getMinutes(),
+    ss: d.getSeconds(),
+  }
+}
+
 function Overview() {
   const { t } = useTranslation()
-  const [time, setTime] = useState({
-    hh: DateTime.now().setLocale("en-US").hour,
-    mm: DateTime.now().setLocale("en-US").minute,
-    ss: DateTime.now().setLocale("en-US").second,
-  })
+  const [time, setTime] = useState(getCurrentClock)
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setTime({
-        hh: DateTime.now().setLocale("en-US").hour,
-        mm: DateTime.now().setLocale("en-US").minute,
-        ss: DateTime.now().setLocale("en-US").second,
-      })
+      setTime(getCurrentClock())
     }, 1000)
 
     return () => clearInterval(timer)

@@ -25,6 +25,7 @@ type ExchangeRates = Record<string, number>
 type AssetSort = "weight_asc" | "weight_desc" | "price_asc" | "price_desc"
 
 type AssetItem = {
+  uid: string
   id: string
   name: string
   displayIndex: number
@@ -195,7 +196,7 @@ function formatEndDate(endDate?: string): string {
 
 function buildAssetItem(now: number, server: NezhaServer, rates: ExchangeRates): AssetItem {
   const formatted = formatNezhaInfo(now, server)
-  const parsed = parsePublicNote(formatted.public_note)
+  const parsed = server.parsed_note ?? parsePublicNote(formatted.public_note)
   const billing = parsed?.billingDataMod
   const sourceAmount = billing ? parseBillingAmountNumber(billing.amount) : null
   const sourceCurrency = normalizeBillingCurrency(resolveThemeBillingCurrency(server, billing?.currency) || billing?.currency)
@@ -207,6 +208,7 @@ function buildAssetItem(now: number, server: NezhaServer, rates: ExchangeRates):
   const extra = parsed?.planDataMod?.extra || ""
 
   return {
+    uid: server.uid || String(formatted.id),
     id: String(formatted.id),
     name: formatted.name,
     displayIndex: formatted.display_index || 0,
@@ -237,11 +239,12 @@ function sortAssetItems(items: AssetItem[], sortBy: AssetSort) {
   })
 }
 
-function useExchangeRates(refreshKey: number) {
+function useExchangeRates(refreshKey: number, enabled: boolean) {
   const [rates, setRates] = useState<ExchangeRates>(DEFAULT_EXCHANGE_RATES)
   const [status, setStatus] = useState("使用默认汇率")
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     const controller = new AbortController()
     const timeout = window.setTimeout(() => controller.abort(), 5000)
@@ -253,9 +256,16 @@ function useExchangeRates(refreshKey: number) {
         try {
           const res = await fetch(url, { cache: "no-store", signal: controller.signal })
           if (!res.ok) continue
-          const data = (await res.json()) as { rates?: ExchangeRates }
-          if (data.rates && !cancelled) {
-            setRates({ ...DEFAULT_EXCHANGE_RATES, ...data.rates, CNY: 1 })
+          const data = (await res.json()) as { rates?: Record<string, unknown> }
+          if (data.rates && typeof data.rates === "object" && !cancelled) {
+            const cleanRates: ExchangeRates = { ...DEFAULT_EXCHANGE_RATES }
+            for (const [k, v] of Object.entries(data.rates)) {
+              if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+                cleanRates[k] = v
+              }
+            }
+            cleanRates.CNY = 1
+            setRates(cleanRates)
             setStatus(`汇率更新: ${new Date().toLocaleTimeString()}`)
             return
           }
@@ -275,7 +285,7 @@ function useExchangeRates(refreshKey: number) {
       controller.abort()
       window.clearTimeout(timeout)
     }
-  }, [refreshKey])
+  }, [enabled, refreshKey])
 
   return { rates, status }
 }
@@ -291,6 +301,7 @@ function FinanceRow({ label, value, accentClass }: { label: string; value: strin
 
 export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetProps) {
   const [open, setOpen] = useState(false)
+  const [activated, setActivated] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [targetCurrency, setTargetCurrency] = useState(getInitialCurrency)
   const [sortBy, setSortBy] = useState<AssetSort>((localStorage.getItem("asset_card_sort") as AssetSort) || "weight_asc")
@@ -298,7 +309,7 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
   const [tradeItem, setTradeItem] = useState<AssetItem | null>(null)
   const [tradeAmount, setTradeAmount] = useState("")
   const [tradeDate, setTradeDate] = useState(new Date().toISOString().slice(0, 10))
-  const { rates, status } = useExchangeRates(refreshKey)
+  const { rates, status } = useExchangeRates(refreshKey, activated)
 
   const palette = useMemo(() => {
     const colorKey = resolveThemeColor((window as unknown as Record<string, unknown>).AssetCardColor)
@@ -353,7 +364,10 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
           palette.triggerText,
           open ? "pointer-events-none scale-0 opacity-0" : "scale-100 opacity-100 hover:scale-105",
         )}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setActivated(true)
+          setOpen(true)
+        }}
       >
         <CircleDollarSign className="size-6" />
       </button>
@@ -408,7 +422,7 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
 
                 return (
                   <button
-                    key={item.id}
+                    key={item.uid}
                     type="button"
                     className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1.5 text-left text-[13px] transition hover:bg-accent"
                     onClick={() => {

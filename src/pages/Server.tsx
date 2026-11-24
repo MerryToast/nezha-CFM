@@ -1,5 +1,4 @@
 import AssetSummaryWidget from "@/components/AssetSummaryWidget"
-import GlobalMap from "@/components/GlobalMap"
 import GroupSwitch from "@/components/GroupSwitch"
 import LiveTimeoutModal from "@/components/LiveTimeoutModal"
 import ServerCard from "@/components/ServerCard"
@@ -15,7 +14,7 @@ import { SORT_ORDERS, SORT_TYPES } from "@/context/sort-context"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { useSort } from "@/hooks/use-sort"
 import { useStatus } from "@/hooks/use-status"
-import { cn, formatNezhaInfo } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -24,7 +23,9 @@ import {
   MapIcon,
   ViewColumnsIcon,
 } from "@heroicons/react/20/solid"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react"
+
+const GlobalMap = lazy(() => import("@/components/GlobalMap"))
 
 export default function Servers() {
   const { sortType, sortOrder, setSortOrder, setSortType } = useSort()
@@ -155,6 +156,132 @@ export default function Servers() {
     }
   }, [currentGroup, groupTabs, servers.length])
 
+  const precomputedEntries = useMemo(() => {
+    return servers.map((server) => {
+      const lastActiveTime =
+        server.last_updated || (server.last_active ? Date.parse(server.last_active) : 0)
+      const online =
+        lastActiveTime > 0
+          ? now - lastActiveTime < 300_000
+          : typeof server.online === "boolean"
+            ? server.online
+            : false
+      const memTotal = server.host.mem_total || 0
+      const diskTotal = server.host.disk_total || 0
+      return {
+        server,
+        online,
+        memUsage: memTotal > 0 ? (server.state.mem_used / memTotal) * 100 : 0,
+        diskUsage: diskTotal > 0 ? (server.state.disk_used / diskTotal) * 100 : 0,
+      }
+    })
+  }, [now, servers])
+
+  const {
+    groupFilteredServers,
+    filteredServers,
+    totalServers,
+    onlineServers,
+    offlineServers,
+    up,
+    down,
+    upSpeed,
+    downSpeed,
+  } = useMemo(() => {
+    const groupEntries =
+      currentGroup === "All"
+        ? precomputedEntries
+        : precomputedEntries.filter((e) => String(e.server.server_group || "").trim() === currentGroup)
+
+    const isAllGroup = currentGroup === "All"
+    let calcOnline = 0
+    let calcNetTx = 0
+    let calcNetRx = 0
+    let calcSpeedOut = 0
+    let calcSpeedIn = 0
+
+    if (!isAllGroup) {
+      for (const entry of groupEntries) {
+        calcNetTx += entry.server.state?.net_out_transfer ?? 0
+        calcNetRx += entry.server.state?.net_in_transfer ?? 0
+        if (entry.online) {
+          calcOnline += 1
+          calcSpeedOut += entry.server.state?.net_out_speed ?? 0
+          calcSpeedIn += entry.server.state?.net_in_speed ?? 0
+        }
+      }
+    }
+
+    const totalCount = isAllGroup ? stats.total : groupEntries.length
+    const onlineCount = isAllGroup ? stats.online : calcOnline
+    const offlineCount = isAllGroup ? stats.offline : totalCount - onlineCount
+
+    const statusEntries =
+      status === "all"
+        ? groupEntries
+        : groupEntries.filter((entry) => (status === "online" ? entry.online : !entry.online))
+
+    const sortedEntries = statusEntries.slice().sort((a, b) => {
+      if (sortType !== "name") {
+        if (!a.online && b.online) return 1
+        if (a.online && !b.online) return -1
+        if (!a.online && !b.online) {
+          return (a.server.display_index ?? 0) - (b.server.display_index ?? 0)
+        }
+      }
+
+      let comparison = 0
+      switch (sortType) {
+        case "name":
+          comparison = a.server.name.localeCompare(b.server.name)
+          break
+        case "uptime":
+          comparison = (a.server.state?.uptime ?? 0) - (b.server.state?.uptime ?? 0)
+          break
+        case "system":
+          comparison = (a.server.host.platform || "").localeCompare(b.server.host.platform || "")
+          break
+        case "cpu":
+          comparison = (a.server.state?.cpu ?? 0) - (b.server.state?.cpu ?? 0)
+          break
+        case "mem":
+          comparison = a.memUsage - b.memUsage
+          break
+        case "disk":
+          comparison = a.diskUsage - b.diskUsage
+          break
+        case "up":
+          comparison = (a.server.state?.net_out_speed ?? 0) - (b.server.state?.net_out_speed ?? 0)
+          break
+        case "down":
+          comparison = (a.server.state?.net_in_speed ?? 0) - (b.server.state?.net_in_speed ?? 0)
+          break
+        case "up total":
+          comparison = (a.server.state?.net_out_transfer ?? 0) - (b.server.state?.net_out_transfer ?? 0)
+          break
+        case "down total":
+          comparison = (a.server.state?.net_in_transfer ?? 0) - (b.server.state?.net_in_transfer ?? 0)
+          break
+        default:
+          return (a.server.display_index ?? 0) - (b.server.display_index ?? 0)
+      }
+
+      return sortOrder === "asc" ? comparison : -comparison
+    })
+
+    return {
+      groupFilteredServers: groupEntries.map((e) => e.server),
+      filteredServers: sortedEntries.map((e) => e.server),
+      totalServers: totalCount,
+      onlineServers: onlineCount,
+      offlineServers: offlineCount,
+      up: isAllGroup ? stats.globalNetTx : calcNetTx,
+      down: isAllGroup ? stats.globalNetRx : calcNetRx,
+      upSpeed: isAllGroup ? stats.globalSpeedOut : calcSpeedOut,
+      downSpeed: isAllGroup ? stats.globalSpeedIn : calcSpeedIn,
+    }
+  }, [currentGroup, precomputedEntries, sortOrder, sortType, stats, status])
+
   if (dashboardLoading && servers.length === 0) {
     return (
       <div className="flex flex-col items-center min-h-96 justify-center">
@@ -172,95 +299,6 @@ export default function Servers() {
       </div>
     )
   }
-
-  const groupFilteredServers = servers.filter((server) => {
-    if (currentGroup === "All") return true
-    return String(server.server_group || "").trim() === currentGroup
-  })
-
-  const isAllGroup = currentGroup === "All"
-  const totalServers = isAllGroup ? stats.total : groupFilteredServers.length
-  const onlineServers = isAllGroup
-    ? stats.online
-    : groupFilteredServers.filter((s) => formatNezhaInfo(now, s).online).length
-  const offlineServers = isAllGroup ? stats.offline : totalServers - onlineServers
-  const up = isAllGroup
-    ? stats.globalNetTx
-    : groupFilteredServers.reduce((total, s) => total + (s.state?.net_out_transfer ?? 0), 0)
-  const down = isAllGroup
-    ? stats.globalNetRx
-    : groupFilteredServers.reduce((total, s) => total + (s.state?.net_in_transfer ?? 0), 0)
-  const upSpeed = isAllGroup
-    ? stats.globalSpeedOut
-    : groupFilteredServers.reduce(
-        (total, s) => (formatNezhaInfo(now, s).online ? total + (s.state?.net_out_speed ?? 0) : total),
-        0,
-      )
-  const downSpeed = isAllGroup
-    ? stats.globalSpeedIn
-    : groupFilteredServers.reduce(
-        (total, s) => (formatNezhaInfo(now, s).online ? total + (s.state?.net_in_speed ?? 0) : total),
-        0,
-      )
-
-  const filteredServers = groupFilteredServers
-    .filter((server) => {
-      if (status === "all") return true
-      const isOnline = formatNezhaInfo(now, server).online
-      return status === "online" ? isOnline : !isOnline
-    })
-    .slice()
-    .sort((a, b) => {
-      const serverAInfo = formatNezhaInfo(now, a)
-      const serverBInfo = formatNezhaInfo(now, b)
-
-      if (sortType !== "name") {
-        if (!serverAInfo.online && serverBInfo.online) return 1
-        if (serverAInfo.online && !serverBInfo.online) return -1
-        if (!serverAInfo.online && !serverBInfo.online) {
-          return (a.display_index ?? 0) - (b.display_index ?? 0)
-        }
-      }
-
-      let comparison = 0
-
-      switch (sortType) {
-        case "name":
-          comparison = a.name.localeCompare(b.name)
-          break
-        case "uptime":
-          comparison = (a.state?.uptime ?? 0) - (b.state?.uptime ?? 0)
-          break
-        case "system":
-          comparison = (a.host.platform || "").localeCompare(b.host.platform || "")
-          break
-        case "cpu":
-          comparison = (a.state?.cpu ?? 0) - (b.state?.cpu ?? 0)
-          break
-        case "mem":
-          comparison = serverAInfo.mem - serverBInfo.mem
-          break
-        case "disk":
-          comparison = serverAInfo.disk_usage_percent - serverBInfo.disk_usage_percent
-          break
-        case "up":
-          comparison = (a.state?.net_out_speed ?? 0) - (b.state?.net_out_speed ?? 0)
-          break
-        case "down":
-          comparison = (a.state?.net_in_speed ?? 0) - (b.state?.net_in_speed ?? 0)
-          break
-        case "up total":
-          comparison = (a.state?.net_out_transfer ?? 0) - (b.state?.net_out_transfer ?? 0)
-          break
-        case "down total":
-          comparison = (a.state?.net_in_transfer ?? 0) - (b.state?.net_in_transfer ?? 0)
-          break
-        default:
-          return (a.display_index ?? 0) - (b.display_index ?? 0)
-      }
-
-      return sortOrder === "asc" ? comparison : -comparison
-    })
 
   return (
     <div className="mx-auto w-full max-w-5xl px-0">
@@ -420,7 +458,17 @@ export default function Servers() {
         </Popover>
       </div>
 
-      {showMap === "1" && <GlobalMap now={now} serverList={servers} />}
+      {showMap === "1" && (
+        <Suspense
+          fallback={
+            <div className="mt-8 flex h-48 items-center justify-center">
+              <Loader visible={true} />
+            </div>
+          }
+        >
+          <GlobalMap now={now} serverList={servers} />
+        </Suspense>
+      )}
       {showServices === "1" && <ServiceTracker serverList={filteredServers} />}
 
       {inline === "1" && (
@@ -429,7 +477,7 @@ export default function Servers() {
           className="flex flex-col gap-2 overflow-x-scroll scrollbar-hidden mt-6 server-inline-list"
         >
           {filteredServers.map((serverInfo) => (
-            <ServerCardInline now={now} key={serverInfo.id} serverInfo={serverInfo} />
+            <ServerCardInline now={now} key={serverInfo.uid || serverInfo.id} serverInfo={serverInfo} />
           ))}
         </section>
       )}
@@ -440,7 +488,7 @@ export default function Servers() {
           className="grid grid-cols-1 gap-2 md:grid-cols-2 mt-6 server-card-list"
         >
           {filteredServers.map((serverInfo) => (
-            <ServerCard now={now} key={serverInfo.id} serverInfo={serverInfo} />
+            <ServerCard now={now} key={serverInfo.uid || serverInfo.id} serverInfo={serverInfo} />
           ))}
         </section>
       )}

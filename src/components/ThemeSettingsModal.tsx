@@ -1,4 +1,5 @@
 import { getAdminEntryUrl } from "@/api/cfsm-client"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -13,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useCfsm } from "@/hooks/use-cfsm"
+import { sanitizeSafeUrl } from "@/lib/security"
 import { THEME_COLOR_KEYS, ThemeColorKey } from "@/lib/theme-colors"
 import { CfsmThemeOptions } from "@/types/cfsm"
 import { useEffect, useState } from "react"
@@ -58,6 +60,20 @@ const DEFAULT_DRAFT: CfsmThemeOptions = {
   traffic_reset_day_overrides: "",
 }
 
+const DEFAULT_BILLING_CURRENCIES = [
+  "跟随后端",
+  "CNY",
+  "USD",
+  "HKD",
+  "EUR",
+  "GBP",
+  "JPY",
+  "KRW",
+  "SGD",
+  "CAD",
+  "AUD",
+] as const
+
 function toStringValue(val: unknown): string {
   if (val === null || val === undefined) return ""
   if (typeof val === "string") return val
@@ -65,6 +81,20 @@ function toStringValue(val: unknown): string {
     return JSON.stringify(val)
   } catch {
     return String(val)
+  }
+}
+
+function isPlainJsonObjectText(raw: unknown): boolean {
+  if (raw === undefined || raw === null || raw === "") return true
+  if (typeof raw === "object" && !Array.isArray(raw)) return true
+  if (typeof raw !== "string") return false
+  const trimmed = raw.trim()
+  if (!trimmed) return true
+  try {
+    const parsed = JSON.parse(trimmed)
+    return Boolean(parsed && typeof parsed === "object" && !Array.isArray(parsed))
+  } catch {
+    return false
   }
 }
 
@@ -86,25 +116,104 @@ export default function ThemeSettingsModal({ open, onOpenChange }: ThemeSettings
     setDraft((prev) => ({ ...prev, [key]: value }))
   }
 
+  const validateDraft = (src: CfsmThemeOptions): string | null => {
+    const urlFields: Array<[string, unknown]> = [
+      [t("themeSettings.customLogo", "自定义 Logo URL"), src.custom_logo],
+      [t("themeSettings.desktopBg", "桌面端背景图 URL"), src.custom_background_image],
+      [t("themeSettings.mobileBg", "移动端背景图 URL"), src.custom_mobile_background_image],
+      [t("themeSettings.illustration", "概览插图 URL"), src.custom_illustration],
+    ]
+    for (const [label, val] of urlFields) {
+      if (typeof val === "string" && val.trim() && !sanitizeSafeUrl(val, { allowRelative: true, allowHash: false })) {
+        return `${label}: ${t("themeSettings.invalidUrl", "仅支持 http(s) 或以 / 开头的安全地址")}`
+      }
+    }
+
+    if (typeof src.custom_links === "string" && src.custom_links.trim()) {
+      try {
+        const parsed = JSON.parse(src.custom_links.trim())
+        if (!Array.isArray(parsed)) {
+          return t("themeSettings.invalidCustomLinks", "顶部自定义链接必须是 JSON 数组")
+        }
+        for (const item of parsed) {
+          if (item && typeof item === "object" && "link" in item) {
+            const linkVal = (item as Record<string, unknown>).link
+            if (typeof linkVal !== "string" || !sanitizeSafeUrl(linkVal, { allowRelative: true, allowHash: true })) {
+              return t("themeSettings.invalidCustomLinkUrl", "顶部自定义链接包含不安全或无效的 URL")
+            }
+          }
+        }
+      } catch {
+        return t("themeSettings.invalidCustomLinks", "顶部自定义链接必须是合法的 JSON 数组")
+      }
+    }
+
+    if (!isPlainJsonObjectText(src.server_billing_currency_overrides)) {
+      return t("themeSettings.invalidCurrencyOverrides", "节点币种覆盖必须是合法的 JSON 对象")
+    }
+    if (!isPlainJsonObjectText(src.traffic_reset_day_overrides)) {
+      return t("themeSettings.invalidResetOverrides", "流量重置日覆盖必须是合法的 JSON 对象")
+    }
+
+    return null
+  }
+
   const normalizeForSave = (src: CfsmThemeOptions): CfsmThemeOptions => {
     const cleaned: CfsmThemeOptions = { ...src }
-    if (typeof cleaned.custom_links === "string") {
-      const trimmed = cleaned.custom_links.trim()
-      if (!trimmed) {
-        delete cleaned.custom_links
-      } else {
-        try {
-          const parsed = JSON.parse(trimmed)
-          if (Array.isArray(parsed)) cleaned.custom_links = parsed
-        } catch {
-          // keep string if user typed raw string
+
+    for (const jsonArrayKey of ["custom_links"] as const) {
+      const val = cleaned[jsonArrayKey]
+      if (typeof val === "string") {
+        const trimmed = val.trim()
+        if (!trimmed) {
+          delete cleaned[jsonArrayKey]
+        } else {
+          try {
+            const parsed = JSON.parse(trimmed)
+            if (Array.isArray(parsed)) cleaned[jsonArrayKey] = parsed
+          } catch {
+            // keep validated value
+          }
         }
       }
     }
+
+    for (const jsonObjKey of ["server_billing_currency_overrides", "traffic_reset_day_overrides"] as const) {
+      const val = cleaned[jsonObjKey]
+      if (typeof val === "string") {
+        const trimmed = val.trim()
+        if (!trimmed) {
+          delete cleaned[jsonObjKey]
+        } else {
+          try {
+            const parsed = JSON.parse(trimmed)
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              cleaned[jsonObjKey] = parsed
+            }
+          } catch {
+            // keep validated value
+          }
+        }
+      }
+    }
+
+    // Strip redundant empty string fields so theme_options stays compact
+    for (const [key, val] of Object.entries(cleaned)) {
+      if (typeof val === "string" && val.trim() === "") {
+        delete cleaned[key]
+      }
+    }
+
     return cleaned
   }
 
   const handleSave = async () => {
+    const validationError = validateDraft(draft)
+    if (validationError) {
+      toast.error(validationError)
+      return
+    }
+
     const normalized = normalizeForSave(draft)
     if (!isAuthorized) {
       setLocalThemeOptions(normalized)
@@ -169,6 +278,33 @@ export default function ThemeSettingsModal({ open, onOpenChange }: ThemeSettings
                 placeholder="https://... 或留空使用默认图标"
                 value={String(draft.custom_logo || "")}
                 onChange={(e) => updateField("custom_logo", e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label className="text-xs">{t("themeSettings.desktopBg", "桌面端背景图 URL")}</Label>
+              <Input
+                className="h-8 text-xs"
+                placeholder="https://... 或留空使用默认背景"
+                value={String(draft.custom_background_image || "")}
+                onChange={(e) => updateField("custom_background_image", e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label className="text-xs">{t("themeSettings.mobileBg", "移动端背景图 URL")}</Label>
+              <Input
+                className="h-8 text-xs"
+                placeholder="https://... 或留空同步桌面端背景"
+                value={String(draft.custom_mobile_background_image || "")}
+                onChange={(e) => updateField("custom_mobile_background_image", e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label className="text-xs">{t("themeSettings.illustration", "概览插图 URL")}</Label>
+              <Input
+                className="h-8 text-xs"
+                placeholder="https://... 或留空使用默认插图"
+                value={String(draft.custom_illustration || "")}
+                onChange={(e) => updateField("custom_illustration", e.target.value)}
               />
             </div>
             <div className="grid gap-2">
@@ -246,7 +382,7 @@ export default function ThemeSettingsModal({ open, onOpenChange }: ThemeSettings
             {switchItem("traffic_bar_show_billing_mode", t("themeSettings.tbMode", "进度条显示流量计费模式"), draft.traffic_bar_show_billing_mode !== false)}
             {switchItem("show_asset_card", t("themeSettings.showAssetCard", "显示右上角资产统计浮窗"), draft.show_asset_card === true)}
             {switchItem("show_visitor_capsule", t("themeSettings.showVisitorCapsule", "显示底部访客信息胶囊"), draft.show_visitor_capsule === true)}
-            <div className="grid grid-cols-2 gap-3 pt-2">
+            <div className="grid grid-cols-3 gap-2 pt-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs">{t("themeSettings.assetColor", "资产卡片主色")}</Label>
                 <Select
@@ -266,7 +402,7 @@ export default function ThemeSettingsModal({ open, onOpenChange }: ThemeSettings
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label className="text-xs">{t("themeSettings.assetCurrency", "资产汇总默认币种")}</Label>
+                <Label className="text-xs">{t("themeSettings.assetCurrency", "资产默认币种")}</Label>
                 <Select
                   value={String(draft.asset_card_default_currency || "CNY")}
                   onValueChange={(v) => updateField("asset_card_default_currency", v)}
@@ -283,7 +419,57 @@ export default function ThemeSettingsModal({ open, onOpenChange }: ThemeSettings
                   </SelectContent>
                 </Select>
               </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">{t("themeSettings.defaultBillingCurrency", "节点默认计费币种")}</Label>
+                <Select
+                  value={String(draft.default_billing_currency || "跟随后端")}
+                  onValueChange={(v) => updateField("default_billing_currency", v)}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DEFAULT_BILLING_CURRENCIES.map((cur) => (
+                      <SelectItem key={cur} value={cur} className="text-xs">
+                        {cur}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+
+            <Accordion type="single" collapsible className="pt-2">
+              <AccordionItem value="advanced-overrides" className="border-none">
+                <AccordionTrigger className="py-1.5 text-xs font-medium text-muted-foreground hover:no-underline">
+                  {t("themeSettings.advancedOverrides", "高级 JSON 覆盖配置（节点币种 / 重置日）")}
+                </AccordionTrigger>
+                <AccordionContent className="space-y-3 pt-2 pb-0">
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">
+                      {t("themeSettings.currencyOverrides", "单节点计费币种覆盖 (JSON)")}
+                    </Label>
+                    <Input
+                      className="h-8 text-xs font-mono"
+                      placeholder='{"HK-01":"USD","node-uuid":"CNY"}'
+                      value={toStringValue(draft.server_billing_currency_overrides)}
+                      onChange={(e) => updateField("server_billing_currency_overrides", e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">
+                      {t("themeSettings.resetDayOverrides", "单节点流量重置日覆盖 (JSON)")}
+                    </Label>
+                    <Input
+                      className="h-8 text-xs font-mono"
+                      placeholder='{"HK-01":15,"node-uuid":1}'
+                      value={toStringValue(draft.traffic_reset_day_overrides)}
+                      onChange={(e) => updateField("traffic_reset_day_overrides", e.target.value)}
+                    />
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </div>
         </div>
 

@@ -111,15 +111,57 @@ export function loadTurnstileScript(): Promise<void> {
   turnstileScriptPromise = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`)
     if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true })
-      existing.addEventListener(
-        "error",
-        (err) => {
-          turnstileScriptPromise = null
-          reject(err)
-        },
-        { once: true },
-      )
+      let settled = false
+      let pollTimer: number | null = null
+      let timeoutTimer: number | null = null
+
+      const cleanup = () => {
+        existing.removeEventListener("load", onLoad)
+        existing.removeEventListener("error", onError)
+        if (pollTimer !== null) {
+          window.clearInterval(pollTimer)
+          pollTimer = null
+        }
+        if (timeoutTimer !== null) {
+          window.clearTimeout(timeoutTimer)
+          timeoutTimer = null
+        }
+      }
+
+      const onLoad = () => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve()
+      }
+
+      const onError = (err: Event) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        turnstileScriptPromise = null
+        reject(err)
+      }
+
+      if (window.turnstile) {
+        onLoad()
+        return
+      }
+
+      existing.addEventListener("load", onLoad, { once: true })
+      existing.addEventListener("error", onError, { once: true })
+      pollTimer = window.setInterval(() => {
+        if (window.turnstile) {
+          onLoad()
+        }
+      }, 50)
+      timeoutTimer = window.setTimeout(() => {
+        if (settled) return
+        settled = true
+        cleanup()
+        turnstileScriptPromise = null
+        reject(new Error("Turnstile script load timeout"))
+      }, 10_000)
       return
     }
 

@@ -114,17 +114,59 @@ export function getWorkerStaticAssetUrl(assetPath: string, apiIndex = 0): string
   return `/${clean}`
 }
 
-export function getJwtToken(): string {
+function resolveOriginScope(baseUrl?: string): { origin: string; isSameOrigin: boolean } {
+  const currentOrigin = typeof window !== "undefined" ? stripTrailingSlash(window.location.origin) : ""
+  const clean = stripTrailingSlash(String(baseUrl || "").trim())
+  if (!clean) {
+    return { origin: currentOrigin || "default", isSameOrigin: true }
+  }
   try {
-    return localStorage.getItem(STORAGE_KEYS.JWT_TOKEN) || ""
+    const parsed = new URL(clean, currentOrigin || "http://localhost")
+    const origin = stripTrailingSlash(parsed.origin)
+    return {
+      origin: origin || currentOrigin || "default",
+      isSameOrigin: Boolean(currentOrigin && origin === currentOrigin),
+    }
+  } catch {
+    return {
+      origin: clean,
+      isSameOrigin: Boolean(currentOrigin && clean === currentOrigin),
+    }
+  }
+}
+
+export function getJwtToken(baseUrl?: string): string {
+  try {
+    const { origin, isSameOrigin } = resolveOriginScope(baseUrl)
+    const scoped = localStorage.getItem(`${STORAGE_KEYS.JWT_TOKEN}:${origin}`)
+    if (scoped) return scoped
+    // Only fall back to unscoped jwt_token on same-origin deployments (written by /admin login)
+    if (isSameOrigin) {
+      return localStorage.getItem(STORAGE_KEYS.JWT_TOKEN) || ""
+    }
+    return ""
   } catch {
     return ""
   }
 }
 
-export function clearJwtToken(): void {
+export function clearJwtToken(baseUrl?: string): void {
   try {
+    if (baseUrl !== undefined) {
+      const { origin, isSameOrigin } = resolveOriginScope(baseUrl)
+      localStorage.removeItem(`${STORAGE_KEYS.JWT_TOKEN}:${origin}`)
+      if (isSameOrigin) {
+        localStorage.removeItem(STORAGE_KEYS.JWT_TOKEN)
+      }
+      return
+    }
     localStorage.removeItem(STORAGE_KEYS.JWT_TOKEN)
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith(`${STORAGE_KEYS.JWT_TOKEN}:`)) {
+        localStorage.removeItem(k)
+      }
+    }
   } catch {
     // ignore
   }
@@ -146,12 +188,16 @@ export function buildWsUrl(subscribe: string, apiIndex = 0): string {
 
   url.searchParams.set("subscribe", subscribe || "all")
 
-  // Cross-origin WS cannot send same-origin cookies automatically; pass JWT via query param per CFSM spec
+  // Cross-origin WS cannot send same-origin cookies automatically; pass JWT via query param only for private sites over secure transport
   const sameHost = typeof window !== "undefined" && url.host === window.location.host
-  if (!sameHost) {
-    const token = getJwtToken()
-    if (token) {
-      url.searchParams.set("token", token)
+  const siteCfg = getSiteConfigByIndex(apiIndex)
+  if (!sameHost && siteCfg?.is_public !== true) {
+    const isLocalhost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+    if (url.protocol === "wss:" || isLocalhost) {
+      const token = getJwtToken(base)
+      if (token) {
+        url.searchParams.set("token", token)
+      }
     }
   }
   return url.toString()
@@ -207,14 +253,20 @@ async function fetchCFSM<T>(endpoint: string, options: FetchOptions = {}): Promi
   } = options
 
   const base = stripTrailingSlash(baseUrl ?? getApiBases()[0] ?? "")
+  const { isSameOrigin } = resolveOriginScope(base)
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   }
 
   if (includeAuth) {
-    const jwt = getJwtToken()
+    const jwt = getJwtToken(base)
     if (jwt) {
-      headers["Authorization"] = `Bearer ${jwt}`
+      const targetSite = getSiteConfigByIndex(getApiIndexForBase(base))
+      const isConfigOrWrite = endpoint === "/api/config" || endpoint === "/api/theme_options"
+      const isLongHistory = endpoint.startsWith("/api/history/all") && /hours=(48|96|168)\b/.test(endpoint)
+      if (isSameOrigin || isConfigOrWrite || isLongHistory || targetSite?.is_public !== true || Boolean(jwt)) {
+        headers["Authorization"] = `Bearer ${jwt}`
+      }
     }
   }
 
@@ -246,7 +298,7 @@ async function fetchCFSM<T>(endpoint: string, options: FetchOptions = {}): Promi
 
     if (res.status === 401) {
       if (clearJwtOn401) {
-        clearJwtToken()
+        clearJwtToken(base)
       }
       if (notifyOnUnauthorized) {
         notifyAuthEvent({ type: "unauthorized", status: 401, baseUrl: base })
@@ -314,6 +366,19 @@ const siteConfigsByIndex = new Map<number, SiteConfigEntry>()
 const siteSysConfigsByIndex = new Map<number, CfsmSysConfig>()
 let cachedSiteConfig: CfsmSiteConfig | null = null
 let configInFlight: Promise<CfsmSiteConfig> | null = null
+
+function attachUptimeBase(srv: CfsmServer): CfsmServer {
+  const rawUptime = srv.uptime !== undefined && srv.uptime !== null ? Number(srv.uptime) : 0
+  if (!Number.isFinite(rawUptime) || rawUptime <= 0) return srv
+  const rawTs = srv.last_updated ?? srv.last_time ?? srv.timestamp ?? 0
+  const numTs = typeof rawTs === "number" ? rawTs : Number(rawTs)
+  const baseTs = Number.isFinite(numTs) && numTs > 0 ? (numTs < 10_000_000_000 ? numTs * 1000 : numTs) : Date.now()
+  return {
+    ...srv,
+    _uptime_base_sec: Math.floor(rawUptime),
+    _uptime_base_ts: baseTs,
+  }
+}
 
 export function getSiteConfigByIndex(apiIndex = 0): CfsmSiteConfig | null {
   return siteConfigsByIndex.get(apiIndex)?.config ?? null
@@ -605,15 +670,17 @@ export async function fetchServersAll(targetIndices?: number[]): Promise<{
     }
 
     for (const srv of data.servers || []) {
-      servers.push({
-        ...srv,
-        source: base,
-        apiIndex: idx,
-        sysConfig: siteSysConfig,
-      })
+      servers.push(
+        attachUptimeBase({
+          ...srv,
+          source: base,
+          apiIndex: idx,
+          sysConfig: siteSysConfig,
+        }),
+      )
     }
     for (const upd of data.latestReportUpdates || []) {
-      latestReportUpdates.push({ ...upd, source: base })
+      latestReportUpdates.push({ ...upd, source: base, apiIndex: idx })
     }
     if (data.stats) {
       stats.total += data.stats.total || 0
@@ -680,7 +747,7 @@ export async function fetchServerDetail(id: string, apiIndex = 0): Promise<CfsmS
     ...(cachedSiteSysCfg || {}),
     ...(data.sysConfig || {}),
   }
-  return { ...data, source: baseUrl, apiIndex, sysConfig: mergedSysConfig }
+  return attachUptimeBase({ ...data, source: baseUrl, apiIndex, sysConfig: mergedSysConfig })
 }
 
 const historyCache = new Map<string, { ts: number; data: CfsmHistoryRow[] }>()

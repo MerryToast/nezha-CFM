@@ -133,5 +133,19 @@
   "ToggleLightMode": "Toggle Light Mode",
   "ToggleDarkMode": "Toggle Dark Mode",
   "ToggleSystemMode": "Toggle System Mode",
-  "Home": "Home"
+  "Home": "Home",
+  "trafficBar": {
+    "resetPrefix": "Reset",
+    "dayUnit": "d",
+    "billingPrefix": "Mode",
+    "modeMax": "Max",
+    "modeMin": "Min",
+    "modeUp": "Upload",
+    "modeDown": "Download",
+    "modeSum": "Sum"
+  },
+  "visitorCapsule": {
+    "welcomeBack": "Welcome back",
+    "loading": "Loading..."
+  }
 }

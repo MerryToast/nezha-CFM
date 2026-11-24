@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { useStatus } from "@/hooks/use-status"
 import { formatBytes } from "@/lib/format"
+import { sanitizeSafeUrl } from "@/lib/security"
 import { cn } from "@/lib/utils"
 import { ArrowDownCircleIcon, ArrowUpCircleIcon } from "@heroicons/react/20/solid"
 import { useTranslation } from "react-i18next"
@@ -24,9 +25,7 @@ export default function ServerOverview({ online, offline, total, up, down, upSpe
 
   const disableAnimatedMan = themeOptions.disable_animated_man !== false
   const customIllustration =
-    typeof themeOptions.custom_illustration === "string" && themeOptions.custom_illustration.trim()
-      ? themeOptions.custom_illustration.trim()
-      : animatedManDefault
+    sanitizeSafeUrl(themeOptions.custom_illustration, { allowHash: false }) || animatedManDefault
   const customBackgroundImage =
     typeof themeOptions.custom_background_image === "string" && themeOptions.custom_background_image.trim()
       ? themeOptions.custom_background_image.trim()

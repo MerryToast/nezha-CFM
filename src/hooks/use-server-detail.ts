@@ -109,7 +109,7 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
       if (Array.isArray(detail.latestReportUpdates)) {
         for (const upd of detail.latestReportUpdates) {
           if (String(upd.serverId) !== String(serverId) || !Array.isArray(upd.samples)) continue
-          const reportTs = normalizeTimestampMs(upd.reportTs ?? upd.report_timestamp, Date.now())
+          const reportTs = normalizeTimestampMs(upd.reportTs ?? upd.report_timestamp, 0)
           for (const sample of upd.samples) {
             const data = sample.data || sample.payload || sample.metrics
             if (!data) continue

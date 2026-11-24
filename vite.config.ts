@@ -56,8 +56,43 @@ function escapeHtmlAttr(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 }
 
+function hasControlChars(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code <= 0x1f || code === 0x7f) return true
+  }
+  return false
+}
+
+function isSafeCssUrl(value: string): boolean {
+  const trimmed = value.trim()
+  if (!trimmed || hasControlChars(trimmed)) return false
+  if (trimmed.startsWith("/")) {
+    return !trimmed.startsWith("//") && !trimmed.startsWith("/\\")
+  }
+  if (trimmed.startsWith("./")) {
+    return !trimmed.slice(2).includes(":")
+  }
+  try {
+    const u = new URL(trimmed)
+    return u.protocol === "https:" || u.protocol === "http:"
+  } catch {
+    return false
+  }
+}
+
 function escapeCssUrl(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, '\\"')
+  const trimmed = String(value || "").trim()
+  if (!isSafeCssUrl(trimmed)) return ""
+  return trimmed
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\"')
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)")
+    .replace(/</g, "\\3c ")
+    .replace(/>/g, "\\3e ")
+    .replace(/[\r\n]/g, "")
 }
 
 const TURNSTILE_DOMAIN = "https://challenges.cloudflare.com"
@@ -66,18 +101,11 @@ const FONTS_API_DOMAIN = "https://fonts.googleapis.com"
 const FONTS_STATIC_DOMAIN = "https://fonts.gstatic.com"
 const RAW_GITHUB_DOMAIN = "https://raw.githubusercontent.com"
 const DEFAULT_CSP_CONNECT_DOMAINS = [
-  "https://api.github.com",
-  "https://api.iconify.design",
-  "https://api.unisvg.com",
-  "https://api.simplesvg.com",
   "https://api.frankfurter.app",
-  "https://api.frankfurter.dev",
   "https://open.er-api.com",
   "https://api.ip.sb",
   "https://ipwho.is",
-  "https://api.ipapi.is",
   "https://ipapi.co",
-  "https://api.vore.top",
 ]
 
 function buildApiDomainsWithWs(rawApiDomains: string[]): string[] {
@@ -104,7 +132,7 @@ function buildStaticCspMetaContent(apiDomains: string[], cspApiDomains: string[]
     `img-src ${unique(imgSrc)}`,
     `media-src ${unique(imgSrc)}`,
     `font-src ${unique(["'self'", TURNSTILE_DOMAIN, FONTS_STATIC_DOMAIN, ...cspStaticDomains])}`,
-    `connect-src ${unique(["'self'", TURNSTILE_DOMAIN, INSIGHTS_DOMAIN, RAW_GITHUB_DOMAIN, ...DEFAULT_CSP_CONNECT_DOMAINS, ...connectApi])}`,
+    `connect-src ${unique(["'self'", TURNSTILE_DOMAIN, INSIGHTS_DOMAIN, ...DEFAULT_CSP_CONNECT_DOMAINS, ...connectApi])}`,
     `frame-src ${TURNSTILE_DOMAIN}`,
     "form-action 'self'",
     "object-src 'none'",
@@ -112,57 +140,68 @@ function buildStaticCspMetaContent(apiDomains: string[], cspApiDomains: string[]
   ].join(";")
 }
 
-function cfsmStaticEnvPlugin() {
-  const env = loadEnvVars()
-  const apiBases = parseOrigins(env.API_BASE || "")
-  const cspApiDomains = parseOrigins(env.CSP_API || "")
-  const cspStaticDomains = parseOrigins(env.CSP_STATIC || "")
-  const title = (env.TITLE || "").trim()
-  const bg = (env.BACKGROUND_IMAGE || "").trim()
-  const mobileBg = (env.BACKGROUND_IMAGE_MOBILE || "").trim()
+function cfsmStaticEnvPlugin(isStaticBuild: boolean) {
+  const env = isStaticBuild ? loadEnvVars() : {}
+  const apiBases = isStaticBuild ? parseOrigins(env.API_BASE || "") : []
+  const cspApiDomains = isStaticBuild ? parseOrigins(env.CSP_API || "") : []
+  const cspStaticDomains = isStaticBuild ? parseOrigins(env.CSP_STATIC || "") : []
+  const title = isStaticBuild ? (env.TITLE || "").trim() : ""
+  const bg = isStaticBuild ? (env.BACKGROUND_IMAGE || "").trim() : ""
+  const mobileBg = isStaticBuild ? (env.BACKGROUND_IMAGE_MOBILE || "").trim() : ""
 
   return {
     name: "cfsm-static-env-inject",
     transformIndexHtml(html: string) {
       let out = html.replace(/<meta\b(?=[^>]*http-equiv=["']Content-Security-Policy["'])[^>]*>\s*/gi, "")
+      if (!isStaticBuild) {
+        return out
+      }
       if (title) {
         const safeTitle = escapeHtmlAttr(title)
         out = /<title>.*?<\/title>/is.test(out)
-          ? out.replace(/<title>.*?<\/title>/is, `<title>${safeTitle}</title>`)
-          : out.replace(/<\/head>/i, `<title>${safeTitle}</title>\n</head>`)
+          ? out.replace(/<title>.*?<\/title>/is, () => `<title>${safeTitle}</title>`)
+          : out.replace(/<\/head>/i, () => `<title>${safeTitle}</title>\n</head>`)
       }
       if (apiBases.length > 0) {
         const meta = `<meta name="apiBase" content="${escapeHtmlAttr(apiBases.join(","))}">`
         if (/<meta\b(?=[^>]*\bname=["']apiBase["'])[^>]*>/i.test(out)) {
-          out = out.replace(/<meta\b(?=[^>]*\bname=["']apiBase["'])[^>]*>/i, meta)
+          out = out.replace(/<meta\b(?=[^>]*\bname=["']apiBase["'])[^>]*>/i, () => meta)
         } else {
-          out = out.replace(/<\/head>/i, `${meta}\n</head>`)
+          out = out.replace(/<\/head>/i, () => `${meta}\n</head>`)
         }
       }
-      if (cspApiDomains.length > 0 || cspStaticDomains.length > 0) {
+      if (apiBases.length > 0 || cspApiDomains.length > 0 || cspStaticDomains.length > 0) {
         const cspContent = buildStaticCspMetaContent(apiBases, cspApiDomains, cspStaticDomains)
         const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttr(cspContent)}">`
-        out = out.replace(/<\/head>/i, `${cspMeta}\n</head>`)
+        out = out.replace(/<\/head>/i, () => `${cspMeta}\n</head>`)
       }
       if (bg || mobileBg) {
         const rules: string[] = []
         let mobileUrl = ""
         if (bg) {
           const safe = escapeCssUrl(bg)
-          rules.push(
-            `body{background-image:url('${safe}') !important;background-size:cover !important;background-attachment:fixed !important;background-position:center !important;background-repeat:no-repeat !important;}`,
-          )
-          mobileUrl = safe
+          if (safe) {
+            rules.push(
+              `body{background-image:url('${safe}') !important;background-size:cover !important;background-attachment:fixed !important;background-position:center !important;background-repeat:no-repeat !important;}`,
+            )
+            mobileUrl = safe
+          }
         }
         if (mobileBg) {
-          mobileUrl = escapeCssUrl(mobileBg)
+          const safeMobile = escapeCssUrl(mobileBg)
+          if (safeMobile) {
+            mobileUrl = safeMobile
+          }
         }
         if (mobileUrl) {
           rules.push(
             `@media (max-width: 767px){body{position:relative;min-height:100vh;background-image:none !important;background-color:transparent !important;background-attachment:scroll !important;}body::after{content:"";position:fixed;top:0;left:0;width:100%;height:100vh;height:100lvh;pointer-events:none;z-index:-1;background-image:url('${mobileUrl}') !important;background-size:cover !important;background-position:center !important;background-repeat:no-repeat !important;}}`,
           )
         }
-        out = out.replace(/<\/head>/i, `<style>${rules.join("")}</style>\n</head>`)
+        if (rules.length > 0) {
+          const styleTag = `<style>${rules.join("")}</style>`
+          out = out.replace(/<\/head>/i, () => `${styleTag}\n</head>`)
+        }
       }
       return out
     },
@@ -171,10 +210,11 @@ function cfsmStaticEnvPlugin() {
 
 export default defineConfig(({ mode }) => {
   const apiTarget = process.env.VITE_API_TARGET || "http://127.0.0.1:8787"
+  const isStaticBuild = mode === "github-page" || process.env.CFSM_STATIC_BUILD === "true"
 
   const baseConfig: UserConfig = {
     base: "./",
-    plugins: [react(), cfsmStaticEnvPlugin()],
+    plugins: [react(), cfsmStaticEnvPlugin(isStaticBuild)],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

@@ -1,3 +1,4 @@
+import { sanitizeSafeUrl } from "@/lib/security"
 import { useEffect, useState } from "react"
 
 declare global {
@@ -16,16 +17,20 @@ const BACKGROUND_CHANGE_EVENT = "backgroundChange"
 export function useBackground() {
   const [backgroundImage, setBackgroundImage] = useState<string | undefined>(() => {
     if (typeof window === "undefined") return undefined
-    return window.CustomBackgroundImage || sessionStorage.getItem("savedBackgroundImage") || undefined
+    const candidate =
+      sanitizeSafeUrl(window.CustomBackgroundImage, { allowHash: false }) ||
+      sanitizeSafeUrl(sessionStorage.getItem("savedBackgroundImage"), { allowHash: false })
+    return candidate || undefined
   })
 
   useEffect(() => {
     const syncBackground = () => {
-      if (window.CustomBackgroundImage) {
-        setBackgroundImage(window.CustomBackgroundImage)
+      const winBg = sanitizeSafeUrl(window.CustomBackgroundImage, { allowHash: false })
+      if (winBg) {
+        setBackgroundImage(winBg)
         return
       }
-      const savedImage = sessionStorage.getItem("savedBackgroundImage")
+      const savedImage = sanitizeSafeUrl(sessionStorage.getItem("savedBackgroundImage"), { allowHash: false })
       if (savedImage) {
         window.CustomBackgroundImage = savedImage
         setBackgroundImage(savedImage)
@@ -42,7 +47,7 @@ export function useBackground() {
   }, [])
 
   const updateBackground = (newBackground: string | undefined) => {
-    window.CustomBackgroundImage = newBackground || ""
+    window.CustomBackgroundImage = sanitizeSafeUrl(newBackground, { allowHash: false })
     window.dispatchEvent(new Event(BACKGROUND_CHANGE_EVENT))
   }
 

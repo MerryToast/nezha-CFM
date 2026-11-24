@@ -11,6 +11,7 @@ import { Loader } from "./components/loading/Loader"
 import { Button } from "./components/ui/button"
 import { useBackground } from "./hooks/use-background"
 import { useCfsm } from "./hooks/use-cfsm"
+import { toSafeCssUrlValue } from "./lib/security"
 import { cn } from "./lib/utils"
 import ErrorPage from "./pages/ErrorPage"
 import NotFound from "./pages/NotFound"
@@ -81,22 +82,24 @@ const MainApp: React.FC = () => {
     (typeof win.CustomMobileBackgroundImage === "string" && win.CustomMobileBackgroundImage) ||
     undefined
 
-  const hasAnyBackground = Boolean(customBackgroundImage || customMobileBackgroundImage || hasBodyBackground)
+  const safeDesktopBgCss = toSafeCssUrlValue(customBackgroundImage)
+  const safeMobileBgCss = toSafeCssUrlValue(customMobileBackgroundImage)
+  const hasAnyBackground = Boolean(safeDesktopBgCss || safeMobileBgCss || hasBodyBackground)
 
   return (
     <ErrorBoundary>
-      {customBackgroundImage && (
+      {safeDesktopBgCss && (
         <div
           className={cn("fixed inset-0 z-0 bg-cover min-h-lvh bg-no-repeat bg-center dark:brightness-75", {
-            "hidden sm:block": customMobileBackgroundImage,
+            "hidden sm:block": Boolean(safeMobileBgCss),
           })}
-          style={{ backgroundImage: `url(${customBackgroundImage})` }}
+          style={{ backgroundImage: safeDesktopBgCss }}
         />
       )}
-      {customMobileBackgroundImage && (
+      {safeMobileBgCss && (
         <div
           className="fixed inset-0 z-0 bg-cover min-h-lvh bg-no-repeat bg-center sm:hidden dark:brightness-75"
-          style={{ backgroundImage: `url(${customMobileBackgroundImage})` }}
+          style={{ backgroundImage: safeMobileBgCss }}
         />
       )}
       <div
