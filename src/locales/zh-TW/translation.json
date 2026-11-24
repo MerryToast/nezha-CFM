@@ -136,5 +136,19 @@
     "offlineReady": "可離線使用之應用程式",
     "newContent": "有新内容可用",
     "reload": "更新"
+  },
+  "trafficBar": {
+    "resetPrefix": "流量重置",
+    "dayUnit": "日",
+    "billingPrefix": "計費",
+    "modeMax": "較大值",
+    "modeMin": "較小值",
+    "modeUp": "單向(上行)",
+    "modeDown": "單向(下行)",
+    "modeSum": "雙向"
+  },
+  "visitorCapsule": {
+    "welcomeBack": "歡迎回來",
+    "loading": "載入中..."
   }
 }

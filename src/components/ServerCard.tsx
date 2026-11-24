@@ -57,7 +57,7 @@ export default function ServerCard({ now, serverInfo }: { now: number; serverInf
   const showTrafficBar =
     resolvedShowTf !== false && themeOptions.show_traffic_bar !== false && traffic_limit > 0
 
-  const parsedData = parsePublicNote(public_note)
+  const parsedData = serverInfo.parsed_note ?? parsePublicNote(public_note)
 
   return online ? (
     <Card

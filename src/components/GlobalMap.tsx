@@ -5,15 +5,74 @@ import { countryCoordinates } from "@/lib/geo-limit"
 import { cn, formatNezhaInfo } from "@/lib/utils"
 import { NezhaServer } from "@/types/nezha-api"
 import { geoEquirectangular, geoPath } from "d3-geo"
+import { useMemo } from "react"
 import { useTranslation } from "react-i18next"
 
 import MapTooltip from "./MapTooltip"
 
+const MAP_WIDTH = 900
+const MAP_HEIGHT = 500
+
+interface RawGeoFeature {
+  type: "Feature"
+  properties: {
+    iso_a2_eh: string
+    iso_a3_eh: string
+    name: string
+    [key: string]: string
+  }
+  geometry: never
+}
+
+interface PreparedFeature {
+  iso2: string
+  name: string
+  d: string
+  centroid: [number, number] | null
+}
+
+let cachedWorldData: {
+  features: PreparedFeature[]
+  iso2Set: Set<string>
+  projection: ReturnType<typeof geoEquirectangular>
+} | null = null
+
+function getPreparedWorldData() {
+  if (cachedWorldData) return cachedWorldData
+
+  const projection = geoEquirectangular()
+    .scale(140)
+    .translate([MAP_WIDTH / 2, MAP_HEIGHT / 2])
+    .rotate([-12, 0, 0])
+
+  const path = geoPath().projection(projection)
+  const geoJson = JSON.parse(geoJsonString) as { features: RawGeoFeature[] }
+  const filtered = geoJson.features.filter((feature) => feature.properties.iso_a3_eh !== "")
+
+  const iso2Set = new Set<string>()
+  const features: PreparedFeature[] = filtered.map((feature) => {
+    const iso2 = feature.properties.iso_a2_eh
+    if (iso2) iso2Set.add(iso2)
+    const rawCentroid = path.centroid(feature)
+    const centroid: [number, number] | null =
+      rawCentroid && Number.isFinite(rawCentroid[0]) && Number.isFinite(rawCentroid[1])
+        ? [rawCentroid[0], rawCentroid[1]]
+        : null
+    return {
+      iso2,
+      name: feature.properties.name,
+      d: path(feature) || "",
+      centroid,
+    }
+  })
+
+  cachedWorldData = { features, iso2Set, projection }
+  return cachedWorldData
+}
+
 export default function GlobalMap({ serverList, now }: { serverList: NezhaServer[]; now: number }) {
   const { t } = useTranslation()
   const { themeOptions } = useCfsm()
-  const countryList: string[] = []
-  const serverCounts: { [key: string]: number } = {}
 
   const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
   const customBackgroundImage =
@@ -21,22 +80,21 @@ export default function GlobalMap({ serverList, now }: { serverList: NezhaServer
     Boolean(themeOptions?.custom_mobile_background_image) ||
     (typeof win.CustomBackgroundImage === "string" && win.CustomBackgroundImage !== "")
 
-  serverList.forEach((server) => {
-    if (server.country_code) {
-      const countryCode = server.country_code.trim().toUpperCase()
-      if (!countryCode || countryCode === "XX") return
-      if (!countryList.includes(countryCode)) {
-        countryList.push(countryCode)
+  const { countryList, serverCounts } = useMemo(() => {
+    const list: string[] = []
+    const counts: Record<string, number> = {}
+    for (const server of serverList) {
+      if (server.country_code) {
+        const countryCode = server.country_code.trim().toUpperCase()
+        if (!countryCode || countryCode === "XX") continue
+        if (!list.includes(countryCode)) {
+          list.push(countryCode)
+        }
+        counts[countryCode] = (counts[countryCode] || 0) + 1
       }
-      serverCounts[countryCode] = (serverCounts[countryCode] || 0) + 1
     }
-  })
-
-  const width = 900
-  const height = 500
-
-  const geoJson = JSON.parse(geoJsonString)
-  const filteredFeatures = geoJson.features.filter((feature: { properties: { iso_a3_eh: string } }) => feature.properties.iso_a3_eh !== "")
+    return { countryList: list, serverCounts: counts }
+  }, [serverList])
 
   return (
     <section
@@ -51,9 +109,8 @@ export default function GlobalMap({ serverList, now }: { serverList: NezhaServer
         <InteractiveMap
           countries={countryList}
           serverCounts={serverCounts}
-          width={width}
-          height={height}
-          filteredFeatures={filteredFeatures}
+          width={MAP_WIDTH}
+          height={MAP_HEIGHT}
           nezhaServerList={serverList}
           now={now}
         />
@@ -64,30 +121,17 @@ export default function GlobalMap({ serverList, now }: { serverList: NezhaServer
 
 interface InteractiveMapProps {
   countries: string[]
-  serverCounts: { [key: string]: number }
+  serverCounts: Record<string, number>
   width: number
   height: number
-  filteredFeatures: {
-    type: "Feature"
-    properties: {
-      iso_a2_eh: string
-      [key: string]: string
-    }
-    geometry: never
-  }[]
   nezhaServerList: NezhaServer[]
   now: number
 }
 
-export function InteractiveMap({ countries, serverCounts, width, height, filteredFeatures, nezhaServerList, now }: InteractiveMapProps) {
+export function InteractiveMap({ countries, serverCounts, width, height, nezhaServerList, now }: InteractiveMapProps) {
   const { setTooltipData } = useTooltip()
-
-  const projection = geoEquirectangular()
-    .scale(140)
-    .translate([width / 2, height / 2])
-    .rotate([-12, 0, 0])
-
-  const path = geoPath().projection(projection)
+  const { features, iso2Set, projection } = useMemo(() => getPreparedWorldData(), [])
+  const countrySet = useMemo(() => new Set(countries), [countries])
 
   return (
     <div className="relative w-full aspect-[2/1]" onMouseLeave={() => setTooltipData(null)}>
@@ -100,15 +144,14 @@ export function InteractiveMap({ countries, serverCounts, width, height, filtere
         <g>
           {/* Background rect to handle mouse events in empty areas */}
           <rect x="0" y="0" width={width} height={height} fill="transparent" onMouseEnter={() => setTooltipData(null)} />
-          {filteredFeatures.map((feature, index) => {
-            const isHighlighted = countries.includes(feature.properties.iso_a2_eh)
-
-            const serverCount = serverCounts[feature.properties.iso_a2_eh] || 0
+          {features.map((feature, index) => {
+            const isHighlighted = countrySet.has(feature.iso2)
+            const serverCount = serverCounts[feature.iso2] || 0
 
             return (
               <path
                 key={index}
-                d={path(feature) || ""}
+                d={feature.d}
                 className={
                   isHighlighted
                     ? "fill-green-700 hover:fill-green-600    dark:fill-green-900 dark:hover:fill-green-700 transition-all cursor-pointer"
@@ -119,8 +162,8 @@ export function InteractiveMap({ countries, serverCounts, width, height, filtere
                     setTooltipData(null)
                     return
                   }
-                  if (path.centroid(feature)) {
-                    const countryCode = feature.properties.iso_a2_eh
+                  if (feature.centroid) {
+                    const countryCode = feature.iso2
                     const countryServers = nezhaServerList
                       .filter((server: NezhaServer) => server.country_code?.toUpperCase() === countryCode)
                       .map((server: NezhaServer) => ({
@@ -128,8 +171,8 @@ export function InteractiveMap({ countries, serverCounts, width, height, filtere
                         status: formatNezhaInfo(now, server).online,
                       }))
                     setTooltipData({
-                      centroid: path.centroid(feature),
-                      country: feature.properties.name,
+                      centroid: feature.centroid,
+                      country: feature.name,
                       count: serverCount,
                       servers: countryServers,
                     })
@@ -141,17 +184,11 @@ export function InteractiveMap({ countries, serverCounts, width, height, filtere
 
           {/* 渲染不在 filteredFeatures 中的国家标记点 */}
           {countries.map((countryCode) => {
-            // 检查该国家是否已经在 filteredFeatures 中
-            const isInFilteredFeatures = filteredFeatures.some((feature) => feature.properties.iso_a2_eh === countryCode)
+            if (iso2Set.has(countryCode)) return null
 
-            // 如果已经在 filteredFeatures 中，跳过
-            if (isInFilteredFeatures) return null
-
-            // 获取国家的经纬度
             const coords = countryCoordinates[countryCode]
             if (!coords) return null
 
-            // 使用投影函数将经纬度转换为 SVG 坐标
             const [x, y] = projection([coords.lng, coords.lat]) || [0, 0]
             const serverCount = serverCounts[countryCode] || 0
 

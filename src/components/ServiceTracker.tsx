@@ -188,7 +188,7 @@ export function ServiceTracker({ serverList }: { serverList: NezhaServer[] }) {
       <section className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
         {threeNetCards.map(({ server, buckets, avgDelay, avgLoss }) => (
           <ServiceTrackerClient
-            key={server.id}
+            key={server.uid || server.id}
             buckets={buckets}
             title={server.name}
             avgDelay={avgDelay}

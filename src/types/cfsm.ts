@@ -48,6 +48,7 @@ export interface CfsmLatestReportUpdate {
   reportAgeMs?: number
   samples: CfsmLatestReportSample[]
   source?: string
+  apiIndex?: number
 }
 
 export interface CfsmSysConfig {
@@ -129,7 +130,7 @@ export interface CfsmSiteConfig {
   site_title: string
   display_mode?: string
   preferred_theme?: "auto" | "dark" | "light" | string
-  default_language?: "auto" | "zh" | "zh-TW" | "en" | "es" | "fr" | "id" | "ja" | string
+  default_language?: "auto" | "zh" | "zh-TW" | "en" | "es" | "de" | "ru" | "ta" | string
   theme_options: CfsmThemeOptions
   verified: boolean
   turnstile_verified: string | null
@@ -218,9 +219,11 @@ export interface CfsmServer {
   is_online?: boolean
   latestReportUpdates?: CfsmLatestReportUpdate[]
   sysConfig?: CfsmSysConfig
-  // Client metadata for multi-apiBase
+  // Client metadata for multi-apiBase & live uptime tracking
   source?: string
   apiIndex?: number
+  _uptime_base_sec?: number
+  _uptime_base_ts?: number
 }
 
 export interface CfsmGlobalStats {

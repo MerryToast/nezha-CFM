@@ -3,11 +3,12 @@ import {
   calcTrafficUsed,
   parseTagMetadata,
 } from "@/lib/cfsm-normalizer"
-import { NezhaServer } from "@/types/nezha-api"
+import { BillingData, NezhaServer, PlanData, PublicNoteData } from "@/types/nezha-api"
 import { type ClassValue, clsx } from "clsx"
 import dayjs from "dayjs"
 import { twMerge } from "tailwind-merge"
 
+export type { BillingData, PlanData, PublicNoteData }
 export { calcTrafficUsed, parseTagMetadata, TAG_COLORS }
 
 export function cn(...inputs: ClassValue[]) {
@@ -48,8 +49,8 @@ export function formatNezhaInfo(now: number, serverInfo: NezhaServer) {
     platform: serverInfo.host.platform || "",
     net_out_transfer: serverInfo.state.net_out_transfer || 0,
     net_in_transfer: serverInfo.state.net_in_transfer || 0,
-    net_tx_monthly: serverInfo.net_tx_monthly ?? serverInfo.state.net_out_transfer ?? 0,
-    net_rx_monthly: serverInfo.net_rx_monthly ?? serverInfo.state.net_in_transfer ?? 0,
+    net_tx_monthly: serverInfo.net_tx_monthly ?? 0,
+    net_rx_monthly: serverInfo.net_rx_monthly ?? 0,
     arch: serverInfo.host.arch || "",
     mem_total: memTotal,
     swap_total: swapTotal,
@@ -208,30 +209,6 @@ export function formatTime(timestamp: number): string {
   const minutes = String(date.getMinutes()).padStart(2, "0")
   const seconds = String(date.getSeconds()).padStart(2, "0")
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
-}
-
-export interface BillingData {
-  startDate: string
-  endDate: string
-  autoRenewal: string
-  cycle: string
-  amount: string
-  currency?: string
-}
-
-export interface PlanData {
-  bandwidth: string
-  trafficVol: string
-  trafficType: string
-  IPv4: string
-  IPv6: string
-  networkRoute: string
-  extra: string
-}
-
-export interface PublicNoteData {
-  billingDataMod?: BillingData
-  planDataMod?: PlanData
 }
 
 function getCnyLabel(): string {

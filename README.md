@@ -45,6 +45,8 @@
    https://<你的用户名>.github.io,https://status.example.com
    ```
 
+5. **⚠️ 私密站点提示**：若 CFSM 站点关闭了公开访问（`is_public: false`），前后端分离部署会依赖跨站 Cookie 传递登录态，可能被现代浏览器（Safari ITP、无痕模式、第三方 Cookie 限制）拦截。私密站点强烈建议使用**方式一（Worker 同域反代）**。
+
 ---
 
 ## 节点增强标签语法

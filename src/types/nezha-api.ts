@@ -6,17 +6,43 @@ import type {
   ProbeMetricValue,
 } from "./cfsm"
 
+export interface BillingData {
+  startDate: string
+  endDate: string
+  autoRenewal: string
+  cycle: string
+  amount: string
+  currency?: string
+}
+
+export interface PlanData {
+  bandwidth: string
+  trafficVol: string
+  trafficType: string
+  IPv4: string
+  IPv6: string
+  networkRoute: string
+  extra: string
+}
+
+export interface PublicNoteData {
+  billingDataMod?: BillingData
+  planDataMod?: PlanData
+}
+
 export interface NezhaWebsocketResponse {
   now: number
   servers: NezhaServer[]
 }
 
 export interface NezhaServer {
+  uid: string
   uuid: string
   id: string
   name: string
   server_group: string
   public_note: string
+  parsed_note?: PublicNoteData
   last_active: string
   last_updated: number
   country_code: string

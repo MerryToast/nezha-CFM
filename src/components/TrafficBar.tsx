@@ -1,6 +1,7 @@
 import { normalizeTrafficCalcType } from "@/lib/cfsm-normalizer"
 import { formatBytes } from "@/lib/format"
 import { useEffect, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 interface TrafficBarProps {
   used: number
@@ -9,12 +10,31 @@ interface TrafficBarProps {
   limitType: string
 }
 
+const tickSubscribers = new Set<() => void>()
+let sharedTickTimer: ReturnType<typeof setInterval> | null = null
+
+function subscribeTrafficBarTick(cb: () => void): () => void {
+  tickSubscribers.add(cb)
+  if (sharedTickTimer === null) {
+    sharedTickTimer = setInterval(() => {
+      tickSubscribers.forEach((fn) => fn())
+    }, 3000)
+  }
+  return () => {
+    tickSubscribers.delete(cb)
+    if (tickSubscribers.size === 0 && sharedTickTimer !== null) {
+      clearInterval(sharedTickTimer)
+      sharedTickTimer = null
+    }
+  }
+}
+
 function getMonthlyResetDate(now: Date, day: number): Date {
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
   return new Date(now.getFullYear(), now.getMonth(), Math.min(day, lastDay))
 }
 
-function calcResetDays(resetDay?: number): string {
+function calcResetDays(resetDay: number | undefined, dayUnit: string): string {
   if (!resetDay || resetDay < 1 || resetDay > 31) return "N/A"
 
   const now = new Date()
@@ -24,22 +44,7 @@ function calcResetDays(resetDay?: number): string {
     reset = getMonthlyResetDate(nextMonth, resetDay)
   }
 
-  return Math.ceil((reset.getTime() - now.getTime()) / 86400000) + "日"
-}
-
-function getTypeLabel(type: string): string {
-  switch (normalizeTrafficCalcType(type)) {
-    case "max":
-      return "较大值"
-    case "min":
-      return "较小值"
-    case "up":
-      return "单向(上行)"
-    case "down":
-      return "单向(下行)"
-    default:
-      return "双向"
-  }
+  return `${Math.ceil((reset.getTime() - now.getTime()) / 86400000)}${dayUnit}`
 }
 
 function getColor(percent: number): string {
@@ -47,9 +52,10 @@ function getColor(percent: number): string {
 }
 
 export default function TrafficBar({ used, limit, resetDay, limitType }: TrafficBarProps) {
+  const { t } = useTranslation()
   const [infoIndex, setInfoIndex] = useState(0)
   const [fading, setFading] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fadeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const win = window as unknown as Record<string, unknown>
   const showPercent = win.TrafficBarShowPercent !== false
@@ -61,32 +67,60 @@ export default function TrafficBar({ used, limit, resetDay, limitType }: Traffic
   const percentStr = percent.toFixed(2)
   const usedFormatted = formatBytes(safeUsed)
   const limitFormatted = formatBytes(limit)
-  const resetDays = calcResetDays(resetDay)
+  const resetDays = calcResetDays(resetDay, t("trafficBar.dayUnit", "日"))
+
+  const getTypeLabel = (type: string): string => {
+    switch (normalizeTrafficCalcType(type)) {
+      case "max":
+        return t("trafficBar.modeMax", "较大值")
+      case "min":
+        return t("trafficBar.modeMin", "较小值")
+      case "up":
+        return t("trafficBar.modeUp", "单向(上行)")
+      case "down":
+        return t("trafficBar.modeDown", "单向(下行)")
+      default:
+        return t("trafficBar.modeSum", "双向")
+    }
+  }
 
   const infoItems: string[] = []
   if (showPercent) infoItems.push(`${percentStr}%`)
-  if (showResetDay) infoItems.push(`流量重置: ${resetDays}`)
-  if (showBillingMode) infoItems.push(`计费: ${getTypeLabel(limitType)}`)
+  if (showResetDay) infoItems.push(`${t("trafficBar.resetPrefix", "流量重置")}: ${resetDays}`)
+  if (showBillingMode) infoItems.push(`${t("trafficBar.billingPrefix", "计费")}: ${getTypeLabel(limitType)}`)
 
   const shouldCycle = infoItems.length > 1
 
   useEffect(() => {
     if (!shouldCycle) {
-      if (timerRef.current) clearInterval(timerRef.current)
-      timerRef.current = null
+      if (fadeTimeoutRef.current !== null) {
+        clearTimeout(fadeTimeoutRef.current)
+        fadeTimeoutRef.current = null
+      }
+      setFading(false)
       return
     }
-    timerRef.current = setInterval(() => {
+
+    const unsubscribe = subscribeTrafficBarTick(() => {
       setFading(true)
-      setTimeout(() => {
-        setInfoIndex((prev) => (prev + 1) % infoItems.length)
+      if (fadeTimeoutRef.current !== null) {
+        clearTimeout(fadeTimeoutRef.current)
+      }
+      fadeTimeoutRef.current = setTimeout(() => {
+        fadeTimeoutRef.current = null
+        setInfoIndex((prev) => prev + 1)
         setFading(false)
       }, 500)
-    }, 3000)
+    })
+
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
+      unsubscribe()
+      if (fadeTimeoutRef.current !== null) {
+        clearTimeout(fadeTimeoutRef.current)
+        fadeTimeoutRef.current = null
+      }
     }
-  }, [shouldCycle, infoItems.length])
+  }, [shouldCycle])
 
   if (limit <= 0) return null
 

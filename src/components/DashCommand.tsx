@@ -67,8 +67,8 @@ export function DashCommand() {
           <CommandGroup heading={t("Servers")}>
             {servers.map((server) => (
               <CommandItem
-                key={server.id}
-                value={`${server.name} ${server.server_group} ${server.tags}`}
+                key={server.uid || server.id}
+                value={`${server.name} ${server.server_group} ${server.tags} ${server.uid || server.id}`}
                 onSelect={() => {
                   const query = server.apiIndex ? `?apiIndex=${server.apiIndex}` : ""
                   navigate(`/server/${encodeURIComponent(server.id)}${query}`)

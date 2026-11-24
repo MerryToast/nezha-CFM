@@ -2,6 +2,7 @@ import { USE_MOCK, getAdminEntryUrl, hasConfiguredApiBase } from "@/api/cfsm-cli
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { useCfsm } from "@/hooks/use-cfsm"
+import { sanitizeSafeUrl } from "@/lib/security"
 import { Lock } from "lucide-react"
 import { useEffect } from "react"
 import { useTranslation } from "react-i18next"
@@ -9,7 +10,7 @@ import { useTranslation } from "react-i18next"
 export default function PrivateAccessGate({ siteName, siteDesc }: { siteName: string; siteDesc?: string }) {
   const { t } = useTranslation()
   const { config } = useCfsm()
-  const customLogo = ((window as unknown as Record<string, unknown>).CustomLogo as string) || ""
+  const customLogo = sanitizeSafeUrl((window as unknown as Record<string, unknown>).CustomLogo, { allowHash: false })
   const adminUrl = getAdminEntryUrl(config?.unauthorized_api_index ?? 0)
 
   useEffect(() => {
@@ -49,6 +50,14 @@ export default function PrivateAccessGate({ siteName, siteDesc }: { siteName: st
             {t("privateGate.refreshBtn", "我已登录，刷新页面")}
           </Button>
         </div>
+        {!USE_MOCK && hasConfiguredApiBase() && (
+          <p className="text-[11px] leading-4 text-muted-foreground">
+            {t(
+              "privateGate.crossOriginHint",
+              "提示：当前为前后端分离跨域静态部署，私密站点依赖跨站 Cookie（可能被浏览器第三方 Cookie 策略拦截）。如需私密模式，建议使用方式一（CFSM 后台反代同域部署）。",
+            )}
+          </p>
+        )}
       </Card>
     </div>
   )

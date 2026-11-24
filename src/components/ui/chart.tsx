@@ -57,10 +57,23 @@ const ChartContainer = React.forwardRef<
 })
 ChartContainer.displayName = "Chart"
 
+const SAFE_CSS_COLOR_REGEX = /^[#a-zA-Z0-9(),.%\s-]+$/
+
+function sanitizeCssIdentifier(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "")
+}
+
+function isSafeCssColor(color: unknown): color is string {
+  if (typeof color !== "string") return false
+  const trimmed = color.trim()
+  return Boolean(trimmed) && SAFE_CSS_COLOR_REGEX.test(trimmed) && !trimmed.toLowerCase().includes("url(")
+}
+
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
+  const safeId = sanitizeCssIdentifier(id)
   const colorConfig = Object.entries(config).filter(([, config]) => config.theme || config.color)
 
-  if (!colorConfig.length) {
+  if (!safeId || !colorConfig.length) {
     return null
   }
 
@@ -70,12 +83,14 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
         __html: Object.entries(THEMES)
           .map(
             ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
+${prefix} [data-chart=${safeId}] {
 ${colorConfig
   .map(([key, itemConfig]) => {
+    const safeKey = sanitizeCssIdentifier(key)
     const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color
-    return color ? `  --color-${key}: ${color};` : null
+    return safeKey && isSafeCssColor(color) ? `  --color-${safeKey}: ${color.trim()};` : null
   })
+  .filter(Boolean)
   .join("\n")}
 }
 `,

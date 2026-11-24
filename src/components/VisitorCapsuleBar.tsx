@@ -3,6 +3,7 @@ import { CAPSULE_COLORS, resolveThemeColor } from "@/lib/theme-colors"
 import { cn } from "@/lib/utils"
 import { Globe2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 type VisitorInfo = {
   ip: string
@@ -11,11 +12,41 @@ type VisitorInfo = {
   org: string
 }
 
+const VISITOR_SESSION_KEY = "cfsm_visitor_info"
 // Strictly CSP-whitelisted endpoints in CF-Server-Monitor (src/utils/csp.js)
 const VISITOR_APIS = ["https://ipapi.co/json/", "https://api.ip.sb/geoip", "https://ipwho.is/"]
 
-async function fetchWithTimeout(url: string, timeoutMs = 4500): Promise<Response> {
+function readSessionVisitorInfo(): VisitorInfo | null {
+  try {
+    const raw = sessionStorage.getItem(VISITOR_SESSION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<VisitorInfo>
+    if (parsed && typeof parsed.ip === "string" && parsed.ip) {
+      return {
+        ip: parsed.ip,
+        country: String(parsed.country || "Global"),
+        code: String(parsed.code || "UN"),
+        org: String(parsed.org || "Internet"),
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null
+}
+
+function writeSessionVisitorInfo(info: VisitorInfo): void {
+  try {
+    sessionStorage.setItem(VISITOR_SESSION_KEY, JSON.stringify(info))
+  } catch {
+    // ignore storage errors
+  }
+}
+
+async function fetchWithTimeout(url: string, signal: AbortSignal, timeoutMs = 4500): Promise<Response> {
   const controller = new AbortController()
+  const onParentAbort = () => controller.abort()
+  signal.addEventListener("abort", onParentAbort, { once: true })
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
 
   try {
@@ -25,6 +56,7 @@ async function fetchWithTimeout(url: string, timeoutMs = 4500): Promise<Response
     })
   } finally {
     window.clearTimeout(timeout)
+    signal.removeEventListener("abort", onParentAbort)
   }
 }
 
@@ -42,25 +74,50 @@ function normalizeVisitorInfo(data: Record<string, any>): VisitorInfo {
   }
 }
 
-async function fetchVisitorInfo(): Promise<VisitorInfo> {
+async function fetchVisitorInfo(outerSignal: AbortSignal): Promise<VisitorInfo> {
+  const cached = readSessionVisitorInfo()
+  if (cached) return cached
+
   return new Promise((resolve, reject) => {
     let pending = VISITOR_APIS.length
     let resolved = false
+    const controllers = VISITOR_APIS.map(() => new AbortController())
 
-    VISITOR_APIS.forEach((url) => {
+    const abortAll = () => {
+      for (const ctrl of controllers) {
+        ctrl.abort()
+      }
+    }
+
+    const onOuterAbort = () => {
+      abortAll()
+      if (!resolved) {
+        resolved = true
+        reject(new DOMException("Aborted", "AbortError"))
+      }
+    }
+    outerSignal.addEventListener("abort", onOuterAbort, { once: true })
+
+    VISITOR_APIS.forEach((url, index) => {
       ;(async () => {
         try {
-          const res = await fetchWithTimeout(url)
+          const res = await fetchWithTimeout(url, controllers[index].signal)
           if (!res.ok) throw new Error("Visitor API failed")
           const data = (await res.json()) as Record<string, any>
           const info = normalizeVisitorInfo(data)
           if (!resolved) {
             resolved = true
+            writeSessionVisitorInfo(info)
+            controllers.forEach((ctrl, idx) => {
+              if (idx !== index) ctrl.abort()
+            })
+            outerSignal.removeEventListener("abort", onOuterAbort)
             resolve(info)
           }
         } catch (error) {
           pending -= 1
           if (!resolved && pending === 0) {
+            outerSignal.removeEventListener("abort", onOuterAbort)
             reject(error)
           }
         }
@@ -70,25 +127,28 @@ async function fetchVisitorInfo(): Promise<VisitorInfo> {
 }
 
 export default function VisitorCapsuleBar() {
-  const [visitorInfo, setVisitorInfo] = useState<VisitorInfo | null>(null)
+  const { t } = useTranslation()
+  const [visitorInfo, setVisitorInfo] = useState<VisitorInfo | null>(() => readSessionVisitorInfo())
   const [hasError, setHasError] = useState(false)
   const [active, setActive] = useState(false)
 
   useEffect(() => {
     let mounted = true
+    const controller = new AbortController()
     const showTimer = window.setTimeout(() => setActive(true), 1000)
     const hideTimer = window.setTimeout(() => setActive(false), 12000)
 
-    fetchVisitorInfo()
+    fetchVisitorInfo(controller.signal)
       .then((info) => {
         if (mounted) setVisitorInfo(info)
       })
       .catch(() => {
-        if (mounted) setHasError(true)
+        if (mounted && !controller.signal.aborted) setHasError(true)
       })
 
     return () => {
       mounted = false
+      controller.abort()
       window.clearTimeout(showTimer)
       window.clearTimeout(hideTimer)
     }
@@ -129,10 +189,10 @@ export default function VisitorCapsuleBar() {
         <span className="flex items-center gap-2">
           <span className={cn("font-semibold", palette.errorAccent)}>Hello!</span>
           <span className={cn("h-3 w-px", palette.divider)} />
-          <span>欢迎回来</span>
+          <span>{t("visitorCapsule.welcomeBack", "欢迎回来")}</span>
         </span>
       ) : (
-        <span>Loading...</span>
+        <span>{t("visitorCapsule.loading", "Loading...")}</span>
       )}
     </div>
   )

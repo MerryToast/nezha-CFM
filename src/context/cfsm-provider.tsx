@@ -15,9 +15,12 @@ import { useTheme } from "@/hooks/use-theme"
 import {
   cfsmServerToNezhaServer,
   isCfsmServerOnline,
+  makeServerUid,
   mergeBatchSampleIntoServer,
+  normalizeTimestampMs,
   recomputeStatsFromServers,
 } from "@/lib/cfsm-normalizer"
+import { sanitizeSafeUrl } from "@/lib/security"
 import { setTurnstileToken } from "@/lib/turnstile"
 import {
   CfsmGlobalStats,
@@ -75,11 +78,10 @@ export function applyThemeOptionsToWindow(opts: CfsmThemeOptions, siteDescFallba
   if (typeof window === "undefined") return
   const win = window as unknown as Record<string, unknown>
   win.__cfsmThemeOptions = opts
-  win.CustomBackgroundImage = typeof opts.custom_background_image === "string" ? opts.custom_background_image : ""
-  win.CustomMobileBackgroundImage =
-    typeof opts.custom_mobile_background_image === "string" ? opts.custom_mobile_background_image : ""
-  win.CustomLogo = typeof opts.custom_logo === "string" ? opts.custom_logo : ""
-  win.CustomIllustration = typeof opts.custom_illustration === "string" ? opts.custom_illustration : ""
+  win.CustomBackgroundImage = sanitizeSafeUrl(opts.custom_background_image, { allowHash: false })
+  win.CustomMobileBackgroundImage = sanitizeSafeUrl(opts.custom_mobile_background_image, { allowHash: false })
+  win.CustomLogo = sanitizeSafeUrl(opts.custom_logo, { allowHash: false })
+  win.CustomIllustration = sanitizeSafeUrl(opts.custom_illustration, { allowHash: false })
   win.CustomDesc = typeof opts.site_desc === "string" && opts.site_desc ? opts.site_desc : siteDescFallback
   win.CustomLinks = opts.custom_links ?? ""
   win.ForceTheme = typeof opts.force_theme === "string" ? opts.force_theme : ""
@@ -114,7 +116,7 @@ export function applyThemeOptionsToWindow(opts: CfsmThemeOptions, siteDescFallba
 
 export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { i18n } = useTranslation()
-  const { setTheme } = useTheme()
+  const { setForcedTheme, setDefaultThemePreference } = useTheme()
 
   const [config, setConfig] = useState<CfsmSiteConfig | null>(null)
   const [configLoading, setConfigLoading] = useState(true)
@@ -168,18 +170,11 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         document.title = cfg.site_title
       }
 
-      // Theme preference: force_theme from theme_options > user localStorage > backend preferred_theme
+      // Theme preference: runtime force_theme override > user localStorage > backend preferred_theme
       const forceTheme = opts.force_theme
-      if (forceTheme === "dark" || forceTheme === "light") {
-        setTheme(forceTheme)
-      } else if (!localStorage.getItem("vite-ui-theme")) {
-        const pref = String(cfg.preferred_theme || "auto").toLowerCase()
-        if (pref === "dark" || pref === "light") {
-          setTheme(pref)
-        } else {
-          setTheme("system")
-        }
-      }
+      setForcedTheme(forceTheme === "dark" || forceTheme === "light" ? forceTheme : null)
+      const pref = String(cfg.preferred_theme || "auto").toLowerCase()
+      setDefaultThemePreference(pref === "dark" ? "dark" : pref === "light" ? "light" : "system")
 
       // Language preference: only apply backend default when user hasn't explicitly picked one
       if (!localStorage.getItem("language")) {
@@ -193,7 +188,7 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setTurnstileRequired(needsTurnstile)
       setPrivateRequired(cfg.has_unauthorized_private ?? (cfg.is_public === false && cfg.authorization !== true))
     },
-    [i18n, setTheme],
+    [i18n, setDefaultThemePreference, setForcedTheme],
   )
 
   const loadInitialConfig = useCallback(
@@ -261,6 +256,9 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       themeOptionsRef.current = nextOpts
       setThemeOptionsState(nextOpts)
       applyThemeOptionsToWindow(nextOpts)
+      setForcedTheme(
+        nextOpts.force_theme === "dark" || nextOpts.force_theme === "light" ? nextOpts.force_theme : null,
+      )
       // Re-normalize existing servers immediately so tag/billing/reset_day overrides take effect
       const ts = Date.now()
       const list = Array.from(serversMapRef.current.values())
@@ -270,7 +268,7 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         )
       }
     },
-    [],
+    [setForcedTheme],
   )
 
   const saveRemoteThemeOptions = useCallback(
@@ -291,7 +289,7 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     )
     const nextOnlineMap = new Map<string, boolean>()
     for (const srv of normalized) {
-      nextOnlineMap.set(srv.id, srv.online)
+      nextOnlineMap.set(srv.uid, srv.online)
     }
     renderedOnlineMapRef.current = nextOnlineMap
 
@@ -351,17 +349,6 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         idsByApiIndex.get(idx)!.push(s.id)
       }
 
-      const handleBatchSamples = (serverId: string, samples: LiveSampleEvent[]) => {
-        const existing = serversMapRef.current.get(serverId)
-        if (!existing || samples.length === 0) return
-        let updated = existing
-        for (const sample of samples) {
-          updated = mergeBatchSampleIntoServer(updated, sample.data, sample.ts, sample.reportTs)
-        }
-        serversMapRef.current.set(serverId, updated)
-        dirtyRef.current = true
-      }
-
       const indicesToStart =
         targetIndices && targetIndices.length > 0
           ? targetIndices.filter((idx) => idsByApiIndex.has(idx))
@@ -373,6 +360,18 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         const ids = idsByApiIndex.get(apiIndex)
         if (!ids || ids.length === 0) continue
+
+        const handleBatchSamples = (serverId: string, samples: LiveSampleEvent[]) => {
+          const uid = makeServerUid(apiIndex, serverId)
+          const existing = serversMapRef.current.get(uid)
+          if (!existing || samples.length === 0) return
+          let updated = existing
+          for (const sample of samples) {
+            updated = mergeBatchSampleIntoServer(updated, sample.data, sample.ts, sample.reportTs)
+          }
+          serversMapRef.current.set(uid, updated)
+          dirtyRef.current = true
+        }
 
         const prevCtrl = liveSocketsMapRef.current.get(apiIndex)
         if (prevCtrl) {
@@ -512,28 +511,35 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const nextMap = new Map<string, CfsmServer>()
 
           // Keep servers belonging to untouched healthy sites; replace servers from updated or failed sites
-          serversMapRef.current.forEach((srv, id) => {
+          serversMapRef.current.forEach((srv, uid) => {
             const idx = srv.apiIndex ?? 0
             if (!succeededSet.has(idx) && !failedSet.has(idx)) {
-              nextMap.set(id, srv)
+              nextMap.set(uid, srv)
             }
           })
           for (const srv of res.servers) {
-            nextMap.set(srv.id, srv)
+            nextMap.set(makeServerUid(srv.apiIndex, srv.id), srv)
           }
 
           // Replay cached latestReportUpdates immediately so metrics reflect newest buffered report
           for (const upd of res.latestReportUpdates) {
-            const existing = nextMap.get(upd.serverId)
+            const updApiIdx = upd.apiIndex ?? getApiIndexForBase(upd.source || "")
+            const uid = makeServerUid(updApiIdx, upd.serverId)
+            const existing = nextMap.get(uid)
             if (!existing || !Array.isArray(upd.samples) || upd.samples.length === 0) continue
             let merged = existing
-            const reportTs = Number(upd.reportTs ?? upd.report_timestamp ?? Date.now())
+            const reportTs = normalizeTimestampMs(upd.reportTs ?? upd.report_timestamp, 0)
             for (const s of upd.samples) {
               const data = s.data || s.payload || s.metrics
               if (!data) continue
-              merged = mergeBatchSampleIntoServer(merged, data, Number(s.ts ?? s.timestamp ?? reportTs), reportTs)
+              merged = mergeBatchSampleIntoServer(
+                merged,
+                data,
+                normalizeTimestampMs(s.ts ?? s.timestamp, reportTs),
+                reportTs,
+              )
             }
-            nextMap.set(upd.serverId, merged)
+            nextMap.set(uid, merged)
           }
 
           res.succeededApiIndices.forEach((idx) => pendingSyncApiIndicesRef.current.delete(idx))
@@ -639,7 +645,8 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const ts = Date.now()
           for (const srv of serversMapRef.current.values()) {
             const expectedOnline = isCfsmServerOnline(srv, ts)
-            if (renderedOnlineMapRef.current.get(srv.id) !== expectedOnline) {
+            const uid = makeServerUid(srv.apiIndex, srv.id)
+            if (renderedOnlineMapRef.current.get(uid) !== expectedOnline) {
               flushServersToState()
               break
             }
