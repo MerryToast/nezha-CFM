@@ -26,7 +26,7 @@ export default function ServerDetail() {
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" })
-  }, [decodedId])
+  }, [decodedId, apiIndex])
 
   const {
     loading,
@@ -57,7 +57,7 @@ export default function ServerDetail() {
         </p>
         <Button variant="outline" size="sm" onClick={() => navigate("/")}>
           <ArrowLeft className="mr-1.5 size-4" />
-          {t("error.backHome", "返回首页")}
+          {t("error.backToHome", "回到主页")}
         </Button>
       </div>
     )

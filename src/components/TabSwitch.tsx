@@ -1,10 +1,11 @@
+import { useBackground } from "@/hooks/use-background"
 import { cn } from "@/lib/utils"
 import { m } from "framer-motion"
 import { useTranslation } from "react-i18next"
 
 export default function TabSwitch({ tabs, currentTab, setCurrentTab }: { tabs: string[]; currentTab: string; setCurrentTab: (tab: string) => void }) {
   const { t } = useTranslation()
-  const customBackgroundImage = (window.CustomBackgroundImage as string) !== "" ? window.CustomBackgroundImage : undefined
+  const { hasActiveBackground: customBackgroundImage } = useBackground()
   return (
     <div className="z-50 flex flex-col items-start rounded-[50px] server-info-tab">
       <div

@@ -1,8 +1,9 @@
 import react from "@vitejs/plugin-react-swc"
+import crypto from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { UserConfig, defineConfig } from "vite"
+import { Plugin, UserConfig, defineConfig } from "vite"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -54,6 +55,10 @@ function parseOrigins(raw: string): string[] {
 
 function escapeHtmlAttr(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+function escapeHtmlText(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 function hasControlChars(value: string): boolean {
@@ -121,13 +126,34 @@ function buildApiDomainsWithWs(rawApiDomains: string[]): string[] {
   return Array.from(new Set(out))
 }
 
-function buildStaticCspMetaContent(apiDomains: string[], cspApiDomains: string[], cspStaticDomains: string[]): string {
+function collectInlineScriptHashes(html: string): { html: string; hashes: string[] } {
+  const hashes: string[] = []
+  const normalizedHtml = html.replace(
+    /(<script\b(?![^>]*\bsrc\s*=)[^>]*>)([\s\S]*?)(<\/script>)/gi,
+    (_full, openTag: string, body: string, closeTag: string) => {
+      const lfBody = body.replace(/\r\n?/g, "\n")
+      if (lfBody.trim()) {
+        const digest = crypto.createHash("sha256").update(lfBody, "utf8").digest("base64")
+        hashes.push(`'sha256-${digest}'`)
+      }
+      return `${openTag}${lfBody}${closeTag}`
+    },
+  )
+  return { html: normalizedHtml, hashes }
+}
+
+function buildStaticCspMetaContent(
+  apiDomains: string[],
+  cspApiDomains: string[],
+  cspStaticDomains: string[],
+  inlineScriptHashes: string[],
+): string {
   const unique = (arr: string[]) => Array.from(new Set(arr.filter(Boolean))).join(" ")
   const connectApi = buildApiDomainsWithWs([...apiDomains, ...cspApiDomains])
   const imgSrc = ["'self'", TURNSTILE_DOMAIN, RAW_GITHUB_DOMAIN, ...cspStaticDomains, ...apiDomains, "data:"]
   return [
     "default-src 'self'",
-    `script-src ${unique(["'self'", "'unsafe-inline'", TURNSTILE_DOMAIN, INSIGHTS_DOMAIN, ...cspStaticDomains])}`,
+    `script-src ${unique(["'self'", ...inlineScriptHashes, TURNSTILE_DOMAIN, INSIGHTS_DOMAIN, ...cspStaticDomains])}`,
     `style-src ${unique(["'self'", "'unsafe-inline'", TURNSTILE_DOMAIN, FONTS_API_DOMAIN, ...cspStaticDomains])}`,
     `img-src ${unique(imgSrc)}`,
     `media-src ${unique(imgSrc)}`,
@@ -140,7 +166,7 @@ function buildStaticCspMetaContent(apiDomains: string[], cspApiDomains: string[]
   ].join(";")
 }
 
-function cfsmStaticEnvPlugin(isStaticBuild: boolean) {
+function cfsmStaticEnvPlugin(isStaticBuild: boolean): Plugin {
   const env = isStaticBuild ? loadEnvVars() : {}
   const apiBases = isStaticBuild ? parseOrigins(env.API_BASE || "") : []
   const cspApiDomains = isStaticBuild ? parseOrigins(env.CSP_API || "") : []
@@ -151,59 +177,62 @@ function cfsmStaticEnvPlugin(isStaticBuild: boolean) {
 
   return {
     name: "cfsm-static-env-inject",
-    transformIndexHtml(html: string) {
-      let out = html.replace(/<meta\b(?=[^>]*http-equiv=["']Content-Security-Policy["'])[^>]*>\s*/gi, "")
-      if (!isStaticBuild) {
-        return out
-      }
-      if (title) {
-        const safeTitle = escapeHtmlAttr(title)
-        out = /<title>.*?<\/title>/is.test(out)
-          ? out.replace(/<title>.*?<\/title>/is, () => `<title>${safeTitle}</title>`)
-          : out.replace(/<\/head>/i, () => `<title>${safeTitle}</title>\n</head>`)
-      }
-      if (apiBases.length > 0) {
-        const meta = `<meta name="apiBase" content="${escapeHtmlAttr(apiBases.join(","))}">`
-        if (/<meta\b(?=[^>]*\bname=["']apiBase["'])[^>]*>/i.test(out)) {
-          out = out.replace(/<meta\b(?=[^>]*\bname=["']apiBase["'])[^>]*>/i, () => meta)
-        } else {
-          out = out.replace(/<\/head>/i, () => `${meta}\n</head>`)
+    transformIndexHtml: {
+      order: "post",
+      handler(html: string) {
+        let out = html.replace(/<meta\b(?=[^>]*http-equiv=["']Content-Security-Policy["'])[^>]*>\s*/gi, "")
+        if (!isStaticBuild) {
+          return out
         }
-      }
-      if (apiBases.length > 0 || cspApiDomains.length > 0 || cspStaticDomains.length > 0) {
-        const cspContent = buildStaticCspMetaContent(apiBases, cspApiDomains, cspStaticDomains)
+        if (title) {
+          const safeTitle = escapeHtmlText(title)
+          out = /<title>.*?<\/title>/is.test(out)
+            ? out.replace(/<title>.*?<\/title>/is, () => `<title>${safeTitle}</title>`)
+            : out.replace(/<\/head>/i, () => `<title>${safeTitle}</title>\n</head>`)
+        }
+        if (apiBases.length > 0) {
+          const meta = `<meta name="apiBase" content="${escapeHtmlAttr(apiBases.join(","))}">`
+          if (/<meta\b(?=[^>]*\bname=["']apiBase["'])[^>]*>/i.test(out)) {
+            out = out.replace(/<meta\b(?=[^>]*\bname=["']apiBase["'])[^>]*>/i, () => meta)
+          } else {
+            out = out.replace(/<\/head>/i, () => `${meta}\n</head>`)
+          }
+        }
+        const hashed = collectInlineScriptHashes(out)
+        out = hashed.html
+        const cspContent = buildStaticCspMetaContent(apiBases, cspApiDomains, cspStaticDomains, hashed.hashes)
         const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttr(cspContent)}">`
         out = out.replace(/<\/head>/i, () => `${cspMeta}\n</head>`)
-      }
-      if (bg || mobileBg) {
-        const rules: string[] = []
-        let mobileUrl = ""
-        if (bg) {
-          const safe = escapeCssUrl(bg)
-          if (safe) {
+        if (bg || mobileBg) {
+          const rules: string[] = []
+          let mobileUrl = ""
+          if (bg) {
+            const safe = escapeCssUrl(bg)
+            if (safe) {
+              rules.push(
+                `body{background-image:url('${safe}') !important;background-size:cover !important;background-attachment:fixed !important;background-position:center !important;background-repeat:no-repeat !important;}`,
+              )
+              mobileUrl = safe
+            }
+          }
+          if (mobileBg) {
+            const safeMobile = escapeCssUrl(mobileBg)
+            if (safeMobile) {
+              mobileUrl = safeMobile
+            }
+          }
+          if (mobileUrl) {
             rules.push(
-              `body{background-image:url('${safe}') !important;background-size:cover !important;background-attachment:fixed !important;background-position:center !important;background-repeat:no-repeat !important;}`,
+              `@media (max-width: 767px){body{position:relative;min-height:100vh;background-image:none !important;background-color:transparent !important;background-attachment:scroll !important;}body::after{content:"";position:fixed;top:0;left:0;width:100%;height:100vh;height:100lvh;pointer-events:none;z-index:-1;background-image:url('${mobileUrl}') !important;background-size:cover !important;background-position:center !important;background-repeat:no-repeat !important;}}`,
             )
-            mobileUrl = safe
+          }
+          if (rules.length > 0) {
+            const styleTag = `<style>${rules.join("")}</style>`
+            out = out.replace(/<\/head>/i, () => `${styleTag}\n</head>`)
           }
         }
-        if (mobileBg) {
-          const safeMobile = escapeCssUrl(mobileBg)
-          if (safeMobile) {
-            mobileUrl = safeMobile
-          }
-        }
-        if (mobileUrl) {
-          rules.push(
-            `@media (max-width: 767px){body{position:relative;min-height:100vh;background-image:none !important;background-color:transparent !important;background-attachment:scroll !important;}body::after{content:"";position:fixed;top:0;left:0;width:100%;height:100vh;height:100lvh;pointer-events:none;z-index:-1;background-image:url('${mobileUrl}') !important;background-size:cover !important;background-position:center !important;background-repeat:no-repeat !important;}}`,
-          )
-        }
-        if (rules.length > 0) {
-          const styleTag = `<style>${rules.join("")}</style>`
-          out = out.replace(/<\/head>/i, () => `${styleTag}\n</head>`)
-        }
-      }
-      return out
+        return out
+      },
     },
   }
 }
@@ -244,10 +273,11 @@ export default defineConfig(({ mode }) => {
   }
 
   if (mode === "development") {
+    const allowInsecureProxy = process.env.VITE_PROXY_INSECURE === "true"
     const createProxy = () => ({
       target: apiTarget,
       changeOrigin: true,
-      secure: false,
+      secure: !allowInsecureProxy,
       ws: true,
     })
 

@@ -7,8 +7,7 @@ on:
       - master
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: publish-dist-branch
@@ -17,15 +16,17 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Save source commit message
         run: git log -1 --pretty=%B > "${RUNNER_TEMP}/commit-msg.txt"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@1d0ff469b62b6d0ad9b0af0fb3b1e40be53ce9b9 # v4.2.0
         with:
           node-version: 20
 
@@ -42,6 +43,7 @@ jobs:
           API_BASE: ${{ secrets.API_BASE }}
           TITLE: ${{ secrets.TITLE }}
           BACKGROUND_IMAGE: ${{ secrets.BACKGROUND_IMAGE }}
+          BACKGROUND_IMAGE_MOBILE: ${{ secrets.BACKGROUND_IMAGE_MOBILE }}
           CSP_API: ${{ secrets.CSP_API }}
           CSP_STATIC: ${{ secrets.CSP_STATIC }}
         run: npm run build:github-page

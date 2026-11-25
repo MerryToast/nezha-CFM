@@ -195,6 +195,12 @@ export function ServiceTracker({ serverList }: { serverList: NezhaServer[] }) {
             avgLoss={avgLoss}
             windowHours={sysConfig.latency_window?.hours ?? 2}
             onClick={() => {
+              try {
+                sessionStorage.setItem("fromMainPage", "true")
+                sessionStorage.setItem("scrollPosition", String(window.scrollY || 0))
+              } catch {
+                // ignore storage errors
+              }
               const query = server.apiIndex ? `?apiIndex=${server.apiIndex}` : ""
               navigate(`/server/${encodeURIComponent(server.id)}${query}`)
             }}

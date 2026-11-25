@@ -1,4 +1,5 @@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { useBackground } from "@/hooks/use-background"
 import { cn } from "@/lib/utils"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -37,7 +38,7 @@ export const ServiceTrackerClient: React.FC<ServiceTrackerClientProps> = ({
   onClick,
 }) => {
   const { t } = useTranslation()
-  const customBackgroundImage = (window as unknown as Record<string, unknown>).CustomBackgroundImage
+  const { hasActiveBackground: customBackgroundImage } = useBackground()
 
   const getLossTextColor = (loss: number | null | undefined) => {
     if (loss === null || loss === undefined) return "text-muted-foreground"

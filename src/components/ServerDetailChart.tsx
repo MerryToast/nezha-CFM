@@ -3,7 +3,7 @@ import { ServerDetailChartLoading } from "@/components/loading/ServerDetailLoadi
 import AnimatedCircularProgressBar from "@/components/ui/animated-circular-progress-bar"
 import { Card, CardContent } from "@/components/ui/card"
 import { ChartConfig, ChartContainer, ChartTooltip } from "@/components/ui/chart"
-import { useCfsm } from "@/hooks/use-cfsm"
+import { useBackground } from "@/hooks/use-background"
 import { DETAIL_TIME_OPTIONS } from "@/hooks/use-server-detail"
 import {
   isValidDiskIo,
@@ -100,7 +100,7 @@ function historyRowToPoint(row: CfsmHistoryRow, fallbackServer: NezhaServer | nu
 function serverToPoint(now: number, server: NezhaServer): ChartPoint {
   const info = formatNezhaInfo(now, server)
   return {
-    ts: server.last_updated || now || Date.now(),
+    ts: server.sample_timestamp || server.last_updated || now || Date.now(),
     cpu: Math.max(0, Math.min(100, info.cpu)),
     mem: Math.max(0, Math.min(100, info.mem)),
     swap: Math.max(0, Math.min(100, info.swap)),
@@ -136,15 +136,15 @@ export default function ServerDetailChart({
   historyAuthRequired,
 }: ServerDetailChartProps) {
   const { t } = useTranslation()
-  const { themeOptions } = useCfsm()
+  const { hasActiveBackground: customBackgroundImage } = useBackground()
   const [livePoints, setLivePoints] = useState<ChartPoint[]>([])
 
-  const serverId = server?.id || ""
+  const serverUid = server?.uid || server?.id || ""
 
-  // Reset live session buffer when switching nodes
+  // Reset live session buffer when switching nodes (including same ID across different apiIndex backends)
   useEffect(() => {
     setLivePoints([])
-  }, [serverId])
+  }, [serverUid])
 
   // Append live WebSocket ticks smoothly without extra polling
   useEffect(() => {
@@ -158,7 +158,7 @@ export default function ServerDetailChart({
       const next = [...prev, point]
       return next.length > 240 ? next.slice(next.length - 240) : next
     })
-  }, [server, server?.last_updated, now])
+  }, [server, server?.sample_timestamp, server?.last_updated, now])
 
   const mergedPoints = useMemo<ChartPoint[]>(() => {
     const byTs = new Map<number, ChartPoint>()
@@ -210,12 +210,6 @@ export default function ServerDetailChart({
   if (!server) {
     return <ServerDetailChartLoading />
   }
-
-  const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
-  const customBackgroundImage =
-    Boolean(themeOptions?.custom_background_image) ||
-    Boolean(themeOptions?.custom_mobile_background_image) ||
-    (typeof win.CustomBackgroundImage === "string" && win.CustomBackgroundImage !== "")
 
   const currentInfo = formatNezhaInfo(now, server)
   const hasDiskIo = isValidDiskIo(server.disk) || mergedPoints.some((pt) => pt.diskIo !== null)

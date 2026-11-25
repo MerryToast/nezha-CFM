@@ -385,11 +385,11 @@ function renewExpireDateIfNeeded(
   let year = Number(match[1])
   let month = Number(match[2])
   const day = Number(match[3])
-  const todayStr = new Date(now).toISOString().slice(0, 10)
+  const todayStr = dayjs(now).format("YYYY-MM-DD")
 
   let candidate = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
   let guard = 0
-  while (candidate <= todayStr && guard < 120) {
+  while (candidate < todayStr && guard < 120) {
     const zeroMonth = month - 1 + cycle.months
     year += Math.floor(zeroMonth / 12)
     month = ((zeroMonth % 12) + 12) % 12 + 1
@@ -557,6 +557,7 @@ export function cfsmServerToNezhaServer(
     parsed_note: parsedNote,
     last_active: lastUpdatedMs ? new Date(lastUpdatedMs).toISOString() : "0000-00-00T00:00:00Z",
     last_updated: lastUpdatedMs,
+    sample_timestamp: normalizeTimestampMs(server.sample_timestamp, lastUpdatedMs),
     country_code: countryCode === "xx" ? "" : countryCode,
     display_index: parseFiniteNumber(server.sort_order, 0),
     traffic_limit: trafficLimitBytes,
@@ -647,6 +648,19 @@ const REPORT_LEVEL_KEYS = [
   "ping_bd",
 ] as const
 
+const BLOCKED_SAMPLE_MERGE_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+  "disk",
+  "id",
+  "source",
+  "apiIndex",
+  "sysConfig",
+  "_uptime_base_sec",
+  "_uptime_base_ts",
+])
+
 /**
  * Incrementally merge a WebSocket batchUpdate sample into an existing CfsmServer.
  * Undefined keys are skipped so report-level fields (gpu_info, tags, ping, etc.)
@@ -663,8 +677,8 @@ export function mergeBatchSampleIntoServer(
   const rawSample = sampleData as Record<string, unknown>
 
   for (const [key, value] of Object.entries(rawSample)) {
-    if (key === "disk") continue
-    if (value !== undefined) {
+    if (BLOCKED_SAMPLE_MERGE_KEYS.has(key)) continue
+    if (value !== undefined && Object.prototype.hasOwnProperty.call(rawSample, key)) {
       ;(next as unknown as Record<string, unknown>)[key] = value
     }
   }

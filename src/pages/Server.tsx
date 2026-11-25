@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SORT_ORDERS, SORT_TYPES } from "@/context/sort-context"
+import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { useSort } from "@/hooks/use-sort"
 import { useStatus } from "@/hooks/use-status"
@@ -47,38 +48,35 @@ export default function Servers() {
   const [showServices, setShowServices] = useState<string>("0")
   const [showMap, setShowMap] = useState<string>("0")
   const [inline, setInline] = useState<string>("0")
-  const containerRef = useRef<HTMLDivElement>(null)
+  const scrollRestoredRef = useRef(false)
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false)
   const [currentGroup, setCurrentGroup] = useState<string>(() => {
-    return sessionStorage.getItem("selectedGroup") || "All"
+    try {
+      return sessionStorage.getItem("selectedGroup") || "All"
+    } catch {
+      return "All"
+    }
   })
 
   useEffect(() => {
     return mountDashboard()
   }, [mountDashboard])
 
+  const { hasActiveBackground: customBackgroundImage } = useBackground()
   const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
-  const customBackgroundImage =
-    Boolean(themeOptions?.custom_background_image) ||
-    Boolean(themeOptions?.custom_mobile_background_image) ||
-    (typeof win.CustomBackgroundImage === "string" && win.CustomBackgroundImage !== "")
 
   const showVisitorCapsule =
     themeOptions?.show_visitor_capsule === true || win.ShowVisitorCapsule === true
   const showAssetCard =
     themeOptions?.show_asset_card === true || win.ShowAssetCard === true
 
-  const restoreScrollPosition = () => {
-    const savedPosition = sessionStorage.getItem("scrollPosition")
-    if (savedPosition && containerRef.current) {
-      containerRef.current.scrollTop = Number(savedPosition)
-    }
-  }
-
   const handleTagChange = (newGroup: string) => {
     setCurrentGroup(newGroup)
-    sessionStorage.setItem("selectedGroup", newGroup)
-    sessionStorage.setItem("scrollPosition", String(containerRef.current?.scrollTop || 0))
+    try {
+      sessionStorage.setItem("selectedGroup", newGroup)
+    } catch {
+      // ignore storage errors
+    }
   }
 
   useEffect(() => {
@@ -87,19 +85,25 @@ export default function Servers() {
       setShowServices("1")
     } else if (showServicesState !== null) {
       setShowServices(showServicesState)
+    } else {
+      setShowServices("0")
     }
   }, [themeOptions?.force_show_services, win.ForceShowServices])
 
   useEffect(() => {
     const checkInlineSettings = () => {
       const isMobile = window.innerWidth < 768
-      if (!isMobile) {
-        const inlineState = localStorage.getItem("inline")
-        if (themeOptions?.force_card_inline === true || win.ForceCardInline) {
-          setInline("1")
-        } else if (inlineState !== null) {
-          setInline(inlineState)
-        }
+      if (isMobile) {
+        setInline("0")
+        return
+      }
+      const inlineState = localStorage.getItem("inline")
+      if (themeOptions?.force_card_inline === true || win.ForceCardInline) {
+        setInline("1")
+      } else if (inlineState !== null) {
+        setInline(inlineState)
+      } else {
+        setInline("0")
       }
     }
 
@@ -116,12 +120,26 @@ export default function Servers() {
       setShowMap("1")
     } else if (showMapState !== null) {
       setShowMap(showMapState)
+    } else {
+      setShowMap("0")
     }
   }, [themeOptions?.force_show_map, win.ForceShowMap])
 
   useEffect(() => {
-    restoreScrollPosition()
-  }, [])
+    if (scrollRestoredRef.current || servers.length === 0) return
+    scrollRestoredRef.current = true
+    let savedPosition = 0
+    try {
+      savedPosition = Number(sessionStorage.getItem("scrollPosition") || "0")
+    } catch {
+      savedPosition = 0
+    }
+    if (Number.isFinite(savedPosition) && savedPosition > 0) {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: savedPosition, behavior: "instant" })
+      })
+    }
+  }, [servers.length])
 
   const groupTabs = useMemo(() => {
     const present = new Set<string>()
@@ -472,10 +490,7 @@ export default function Servers() {
       {showServices === "1" && <ServiceTracker serverList={filteredServers} />}
 
       {inline === "1" && (
-        <section
-          ref={containerRef}
-          className="flex flex-col gap-2 overflow-x-scroll scrollbar-hidden mt-6 server-inline-list"
-        >
+        <section className="flex flex-col gap-2 overflow-x-scroll scrollbar-hidden mt-6 server-inline-list">
           {filteredServers.map((serverInfo) => (
             <ServerCardInline now={now} key={serverInfo.uid || serverInfo.id} serverInfo={serverInfo} />
           ))}
@@ -483,10 +498,7 @@ export default function Servers() {
       )}
 
       {inline === "0" && (
-        <section
-          ref={containerRef}
-          className="grid grid-cols-1 gap-2 md:grid-cols-2 mt-6 server-card-list"
-        >
+        <section className="grid grid-cols-1 gap-2 md:grid-cols-2 mt-6 server-card-list">
           {filteredServers.map((serverInfo) => (
             <ServerCard now={now} key={serverInfo.uid || serverInfo.id} serverInfo={serverInfo} />
           ))}

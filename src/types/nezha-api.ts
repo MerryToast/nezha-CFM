@@ -45,6 +45,7 @@ export interface NezhaServer {
   parsed_note?: PublicNoteData
   last_active: string
   last_updated: number
+  sample_timestamp?: number
   country_code: string
   host: NezhaServerHost
   state: NezhaServerStatus

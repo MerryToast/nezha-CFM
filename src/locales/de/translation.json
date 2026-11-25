@@ -96,9 +96,13 @@
     "swap": "Swap"
   },
   "language": {
-    "zh-TW": "Traditionelles Chinesisch",
-    "en-US": "Englisch",
-    "zh-CN": "vereinfachtes Chinesisch"
+    "zh-TW": "繁體中文",
+    "en-US": "English",
+    "zh-CN": "简体中文",
+    "de-DE": "Deutsch",
+    "es-ES": "Español",
+    "ru-RU": "Русский",
+    "ta-IN": "தமிழ்"
   },
   "online": "Online",
   "offline": "Offline",

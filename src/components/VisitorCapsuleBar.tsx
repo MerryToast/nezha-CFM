@@ -1,4 +1,5 @@
 import ServerFlag from "@/components/ServerFlag"
+import { useCfsm } from "@/hooks/use-cfsm"
 import { CAPSULE_COLORS, resolveThemeColor } from "@/lib/theme-colors"
 import { cn } from "@/lib/utils"
 import { Globe2 } from "lucide-react"
@@ -78,56 +79,32 @@ async function fetchVisitorInfo(outerSignal: AbortSignal): Promise<VisitorInfo> 
   const cached = readSessionVisitorInfo()
   if (cached) return cached
 
-  return new Promise((resolve, reject) => {
-    let pending = VISITOR_APIS.length
-    let resolved = false
-    const controllers = VISITOR_APIS.map(() => new AbortController())
-
-    const abortAll = () => {
-      for (const ctrl of controllers) {
-        ctrl.abort()
-      }
+  let lastError: unknown = new Error("Visitor API failed")
+  for (const url of VISITOR_APIS) {
+    if (outerSignal.aborted) {
+      throw new DOMException("Aborted", "AbortError")
     }
-
-    const onOuterAbort = () => {
-      abortAll()
-      if (!resolved) {
-        resolved = true
-        reject(new DOMException("Aborted", "AbortError"))
+    try {
+      const res = await fetchWithTimeout(url, outerSignal)
+      if (!res.ok) {
+        lastError = new Error(`Visitor API HTTP ${res.status}`)
+        continue
       }
+      const data = (await res.json()) as Record<string, any>
+      const info = normalizeVisitorInfo(data)
+      writeSessionVisitorInfo(info)
+      return info
+    } catch (error) {
+      if (outerSignal.aborted) throw error
+      lastError = error
     }
-    outerSignal.addEventListener("abort", onOuterAbort, { once: true })
-
-    VISITOR_APIS.forEach((url, index) => {
-      ;(async () => {
-        try {
-          const res = await fetchWithTimeout(url, controllers[index].signal)
-          if (!res.ok) throw new Error("Visitor API failed")
-          const data = (await res.json()) as Record<string, any>
-          const info = normalizeVisitorInfo(data)
-          if (!resolved) {
-            resolved = true
-            writeSessionVisitorInfo(info)
-            controllers.forEach((ctrl, idx) => {
-              if (idx !== index) ctrl.abort()
-            })
-            outerSignal.removeEventListener("abort", onOuterAbort)
-            resolve(info)
-          }
-        } catch (error) {
-          pending -= 1
-          if (!resolved && pending === 0) {
-            outerSignal.removeEventListener("abort", onOuterAbort)
-            reject(error)
-          }
-        }
-      })()
-    })
-  })
+  }
+  throw lastError
 }
 
 export default function VisitorCapsuleBar() {
   const { t } = useTranslation()
+  const { themeOptions } = useCfsm()
   const [visitorInfo, setVisitorInfo] = useState<VisitorInfo | null>(() => readSessionVisitorInfo())
   const [hasError, setHasError] = useState(false)
   const [active, setActive] = useState(false)
@@ -157,9 +134,11 @@ export default function VisitorCapsuleBar() {
   const canShowFlag = visitorInfo?.code && /^[A-Z]{2}$/.test(visitorInfo.code) && visitorInfo.code !== "UN"
 
   const palette = useMemo(() => {
-    const colorKey = resolveThemeColor((window as unknown as Record<string, unknown>).VisitorCapsuleColor)
-    return CAPSULE_COLORS[colorKey]
-  }, [])
+    const rawColor =
+      themeOptions?.visitor_capsule_color ??
+      (window as unknown as Record<string, unknown>).VisitorCapsuleColor
+    return CAPSULE_COLORS[resolveThemeColor(rawColor)]
+  }, [themeOptions?.visitor_capsule_color])
 
   return (
     <div

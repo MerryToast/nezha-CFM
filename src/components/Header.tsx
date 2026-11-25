@@ -58,7 +58,7 @@ function Header() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { config, configLoading, themeOptions } = useCfsm()
-  const { backgroundImage, updateBackground } = useBackground()
+  const { hasConfiguredBackground, hasActiveBackground, toggleBackground } = useBackground()
   const [logoError, setLogoError] = useState(false)
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
 
@@ -67,25 +67,11 @@ function Header() {
   const customDesc =
     (typeof themeOptions.site_desc === "string" && themeOptions.site_desc.trim()) ||
     "Server Status"
-  const customMobileBackgroundImage = sanitizeSafeUrl(themeOptions.custom_mobile_background_image, { allowHash: false }) || undefined
-  const customBackgroundImage = backgroundImage
+  const customBackgroundImage = hasActiveBackground
 
   useEffect(() => {
     setLogoError(false)
   }, [customLogo])
-
-  const handleBackgroundToggle = () => {
-    const win = window as unknown as Record<string, unknown>
-    if (win.CustomBackgroundImage) {
-      sessionStorage.setItem("savedBackgroundImage", String(win.CustomBackgroundImage))
-      updateBackground(undefined)
-    } else {
-      const savedImage = sessionStorage.getItem("savedBackgroundImage")
-      if (savedImage) {
-        updateBackground(savedImage)
-      }
-    }
-  }
 
   const adminUrl = getAdminEntryUrl()
   const customLinks = useMemo(() => parseCustomLinks(themeOptions.custom_links), [themeOptions.custom_links])
@@ -143,14 +129,13 @@ function Header() {
           >
             <SlidersHorizontal className="w-4 h-4" />
           </Button>
-          {(customBackgroundImage || sessionStorage.getItem("savedBackgroundImage")) && (
+          {hasConfiguredBackground && (
             <Button
               variant="outline"
               size="sm"
-              onClick={handleBackgroundToggle}
+              onClick={toggleBackground}
               className={cn("rounded-full px-[9px] bg-white dark:bg-black", {
                 "bg-white/70 dark:bg-black/70": customBackgroundImage,
-                "hidden sm:block": customMobileBackgroundImage,
               })}
               title={t("toggleBackground", "切换背景")}
             >

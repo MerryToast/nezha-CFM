@@ -129,12 +129,16 @@ export function getDaysBetweenDatesWithAutoRenewal({ autoRenewal, cycle, startDa
     }
   }
 
-  const nowTime = Date.now()
-  const endTime = dayjs(endDate).valueOf()
+  const nowDay = dayjs().startOf("day")
+  const endDay = dayjs(endDate).startOf("day")
+  if (!endDay.isValid()) {
+    throw new Error("Invalid end date")
+  }
+  const todayStr = nowDay.format("YYYY-MM-DD")
 
   if (autoRenewal !== "1") {
-    const days = getDaysBetweenDates(endDate, new Date(nowTime).toISOString())
-    const spanDays = startDate ? dayjs(endDate).diff(startDate, "day") : 30 * months
+    const days = getDaysBetweenDates(endDate, todayStr)
+    const spanDays = startDate ? endDay.diff(dayjs(startDate).startOf("day"), "day") : 30 * months
     const denom = spanDays > 0 ? spanDays : 30 * months
     return {
       days,
@@ -143,8 +147,8 @@ export function getDaysBetweenDatesWithAutoRenewal({ autoRenewal, cycle, startDa
     }
   }
 
-  if (nowTime < endTime) {
-    const days = getDaysBetweenDates(endDate, new Date(nowTime).toISOString())
+  if (!nowDay.isAfter(endDay, "day")) {
+    const days = endDay.diff(nowDay, "day")
     return {
       days,
       cycleLabel,
@@ -152,8 +156,8 @@ export function getDaysBetweenDatesWithAutoRenewal({ autoRenewal, cycle, startDa
     }
   }
 
-  const nextTime = getNextCycleTime(endTime, months, nowTime)
-  const diff = dayjs(nextTime).diff(dayjs(), "day") + 1
+  const nextTime = getNextCycleTime(endDay.valueOf(), months, nowDay.valueOf())
+  const diff = dayjs(nextTime).startOf("day").diff(nowDay, "day")
   return {
     days: diff,
     cycleLabel,
@@ -177,10 +181,10 @@ export function getNextCycleTime(startDate: number, months: number, specifiedDat
 }
 
 export function getDaysBetweenDates(date1: string, date2: string): number {
-  const oneDay = 24 * 60 * 60 * 1000
-  const firstDate = new Date(date1)
-  const secondDate = new Date(date2)
-  return Math.round((firstDate.getTime() - secondDate.getTime()) / oneDay)
+  const firstDate = dayjs(date1).startOf("day")
+  const secondDate = dayjs(date2).startOf("day")
+  if (!firstDate.isValid() || !secondDate.isValid()) return 0
+  return firstDate.diff(secondDate, "day")
 }
 
 export function formatRelativeTime(timestamp: number): string {

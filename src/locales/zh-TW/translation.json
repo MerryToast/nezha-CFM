@@ -7,6 +7,10 @@
   "offline": "離線",
   "whereTheTimeIs": "目前時間",
   "refreshing": "刷新中",
+  "loading": "載入歷史資料中...",
+  "cancel": "取消",
+  "saving": "儲存中...",
+  "toggleBackground": "切換背景",
   "info": {
     "websocketConnecting": "WebSocket 連線中",
     "websocketConnected": "WebSocket 連線成功",
@@ -49,7 +53,10 @@
     "delay": "延遲",
     "daysAgo": "天前",
     "today": "今天",
-    "loading": "載入中..."
+    "loading": "載入中...",
+    "disabledInBackend": "三網延遲詳情未開啟，請在 CFSM 管理後台開啟「顯示三網詳情」",
+    "threeNetWindow": "三網延遲與丟包監測",
+    "allLines": "全部線路"
   },
   "serverDetail": {
     "status": "狀態",
@@ -69,7 +76,11 @@
     "download": "下載",
     "lastActive": "最後上報時間",
     "temperature": "溫度",
-    "bootTime": "啟動時間"
+    "bootTime": "啟動時間",
+    "notFound": "未找到該伺服器節點或無權存取",
+    "loginHistoryPrompt": "登入後台查看完整歷史",
+    "monthlyTraffic": "本月流量 (↑ / ↓)",
+    "diskIo": "磁碟 IO"
   },
   "serverDetailChart": {
     "process": "進程數",
@@ -77,7 +88,11 @@
     "mem": "內存",
     "swap": "虛擬記憶體",
     "upload": "上傳",
-    "download": "下載"
+    "download": "下載",
+    "network": "網路",
+    "connect": "連線數",
+    "load": "系統負載",
+    "diskIo": "磁碟 IO"
   },
   "footer": {
     "themeBy": "主題-"
@@ -86,9 +101,9 @@
     "zh-CN": "简体中文",
     "zh-TW": "繁體中文",
     "en-US": "English",
-    "de-DE": "德文",
-    "es-ES": "西班牙文",
-    "ru-RU": "俄文",
+    "de-DE": "Deutsch",
+    "es-ES": "Español",
+    "ru-RU": "Русский",
     "ta-IN": "தமிழ்"
   },
   "theme": {
@@ -98,7 +113,8 @@
   },
   "error": {
     "pageNotFound": "頁面不存在",
-    "backToHome": "回到主頁"
+    "backToHome": "回到主頁",
+    "somethingWentWrong": "應用程式發生錯誤"
   },
   "tabSwitch": {
     "detail": "詳細資訊",
@@ -107,12 +123,23 @@
     "Network": "網路"
   },
   "monitor": {
-    "noData": "沒有服務監控數據，請在管理後台服務新增監控任務",
+    "noData": "該伺服器未配置延遲檢測",
     "status": "狀態",
     "avgDelay": "延遲",
     "monitorCount": "個監控",
     "packetLoss": "丟包率",
-    "clearSelections": "清除"
+    "clearSelections": "清除",
+    "ct": "電信",
+    "cu": "聯通",
+    "cm": "移動",
+    "bd": "廣電",
+    "node1": "節點 1",
+    "node2": "節點 2",
+    "node3": "節點 3",
+    "node4": "節點 4",
+    "timeout": "逾時",
+    "avgLoss": "平均丟包",
+    "lossShort": "丟包"
   },
   "billingInfo": {
     "remaining": "剩餘天數",
@@ -150,5 +177,118 @@
   "visitorCapsule": {
     "welcomeBack": "歡迎回來",
     "loading": "載入中..."
+  },
+  "turnstile": {
+    "title": "人機驗證",
+    "desc": "目前站點已啟用 Cloudflare Turnstile 驗證，請完成驗證後繼續存取監控面板。",
+    "verifying": "正在校驗憑證...",
+    "failed": "驗證失敗或已過期，請重試",
+    "retry": "重新驗證"
+  },
+  "privateGate": {
+    "subtitle": "私密監控面板",
+    "title": "該監控站點已開啟私密模式",
+    "desc": "存取監控資料前請先前往後台完成管理員登入。",
+    "loginBtn": "前往管理員登入",
+    "refreshBtn": "我已登入，重新整理頁面",
+    "crossOriginHint": "提示：目前為前後端分離跨域靜態部署，私密站點依賴跨站 Cookie（可能被瀏覽器第三方 Cookie 策略攔截）。如需私密模式，建議使用方式一（CFSM 後台反代同域部署）。"
+  },
+  "wsTimeout": {
+    "title": "即時推送已暫停",
+    "desc": "即時監控連線已持續運行 {{minutes}} 分鐘並按站點策略自動斷開，以節省伺服器額度。是否繼續保持即時推送？",
+    "keepStatic": "保持靜態展示",
+    "continue": "繼續即時連線"
+  },
+  "assetWidget": {
+    "openAria": "打開資產統計",
+    "closeAria": "關閉資產統計",
+    "title": "資產統計",
+    "serverCount": "伺服器數量",
+    "totalValue": "總價值",
+    "monthlyCost": "月均支出",
+    "annualCost": "年均支出",
+    "remainingValue": "剩餘總價值",
+    "unresolvedHint": "{{count}} 台伺服器的幣種未配置或無法換算，未計入彙總。",
+    "longTerm": "長期",
+    "longTermHint": "長期機器按原價計入剩餘價值",
+    "unset": "未設置",
+    "empty": "沒有可顯示的資產項目",
+    "rateUpdated": "匯率更新",
+    "defaultRate": "使用預設匯率",
+    "sortWeightAsc": "權重 正序",
+    "sortWeightDesc": "權重 倒序",
+    "sortPriceAsc": "價格 正序",
+    "sortPriceDesc": "價格 倒序",
+    "toggleFree": "切換免費資產",
+    "excludingFree": "目前：已排除免費/白嫖",
+    "includingFree": "目前：包含免費/白嫖",
+    "refreshRate": "重新整理匯率",
+    "tradeTitle": "伺服器交易",
+    "closeTrade": "關閉交易計算",
+    "serverInfo": "伺服器資訊",
+    "name": "名稱",
+    "monthlyTraffic": "月流量",
+    "originalPrice": "原價",
+    "expireDate": "到期時間",
+    "tradeCalc": "交易計算",
+    "tradeDate": "交易日期",
+    "tradeAmount": "交易金額",
+    "tradeAmountPlaceholder": "請輸入交易金額",
+    "remainingVal": "剩餘價值",
+    "premiumAmount": "溢價金額",
+    "premiumRate": "溢價率"
+  },
+  "themeSettings": {
+    "title": "主題外觀與功能設定",
+    "adminDesc": "目前已登入管理員，儲存後將透過 POST /api/theme_options 持久化至伺服端。",
+    "guestDesc": "目前為訪客模式，可臨時預覽；持久化儲存需先登入管理後台。",
+    "appearance": "外觀設定",
+    "siteDesc": "頁頭副標題描述",
+    "customLogo": "自訂 Logo URL",
+    "desktopBg": "桌面端背景圖 URL",
+    "mobileBg": "行動端背景圖 URL",
+    "illustration": "概覽插圖 URL",
+    "customLinks": "頂部自訂連結 (JSON)",
+    "groupOrder": "分組顯示順序 (逗號分隔)",
+    "forceTheme": "主題模式覆蓋",
+    "followSystemSite": "跟隨系統/站點",
+    "cnyStyle": "人民幣符號風格",
+    "layout": "卡片與佈局",
+    "forceShowMap": "預設展開全球地圖",
+    "forceShowServices": "預設展開三網延遲面板",
+    "forceCardInline": "預設行內緊湊視圖",
+    "fixedTopName": "卡片頂部固定節點名稱",
+    "showNetTransfer": "卡片底部顯示累計上下行流量",
+    "hideIpTag": "隱藏 IPv4/IPv6 標籤",
+    "hideVolTag": "隱藏流量配額標籤",
+    "svgFlag": "強制使用 SVG 國旗",
+    "disableMan": "隱藏首頁概覽動畫插圖",
+    "peakCut": "預設開啟網路延遲圖表削峰",
+    "trafficBar": "流量進度條與外掛",
+    "showTrafficBar": "顯示內建流量進度條",
+    "tbPercent": "進度條顯示已用百分比",
+    "tbReset": "進度條顯示流量重置倒數",
+    "tbMode": "進度條顯示流量計費模式",
+    "showAssetCard": "顯示右上角資產統計浮窗",
+    "showVisitorCapsule": "顯示底部訪客資訊膠囊",
+    "assetColor": "資產卡片主色",
+    "capsuleColor": "訪客膠囊主色",
+    "assetCurrency": "資產預設幣種",
+    "defaultBillingCurrency": "節點預設計費幣種",
+    "followBackend": "跟隨後端",
+    "advancedOverrides": "進階 JSON 覆蓋配置（節點幣種 / 重置日）",
+    "currencyOverrides": "單節點計費幣種覆蓋 (JSON)",
+    "resetDayOverrides": "單節點流量重置日覆蓋 (JSON)",
+    "goAdminLogin": "前往後台登入",
+    "saveServer": "儲存到伺服端",
+    "previewOnly": "僅臨時預覽",
+    "invalidUrl": "僅支援 http(s) 或以 / 開頭的安全位址",
+    "invalidCustomLinks": "頂部自訂連結必須是合法的 JSON 陣列",
+    "invalidCustomLinkUrl": "頂部自訂連結包含不安全或無效的 URL",
+    "invalidCurrencyOverrides": "節點幣種覆蓋必須是合法的 JSON 物件",
+    "invalidResetOverrides": "流量重置日覆蓋必須是合法的 JSON 物件",
+    "previewApplied": "已套用本機臨時預覽（管理員登入後可儲存到伺服端）",
+    "saved": "主題配置已儲存到伺服端",
+    "saveFailed": "儲存失敗"
   }
 }

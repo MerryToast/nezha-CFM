@@ -1,4 +1,4 @@
-import { useCfsm } from "@/hooks/use-cfsm"
+import { useBackground } from "@/hooks/use-background"
 import useTooltip from "@/hooks/use-tooltip"
 import { geoJsonString } from "@/lib/geo-json-string"
 import { countryCoordinates } from "@/lib/geo-limit"
@@ -72,13 +72,7 @@ function getPreparedWorldData() {
 
 export default function GlobalMap({ serverList, now }: { serverList: NezhaServer[]; now: number }) {
   const { t } = useTranslation()
-  const { themeOptions } = useCfsm()
-
-  const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
-  const customBackgroundImage =
-    Boolean(themeOptions?.custom_background_image) ||
-    Boolean(themeOptions?.custom_mobile_background_image) ||
-    (typeof win.CustomBackgroundImage === "string" && win.CustomBackgroundImage !== "")
+  const { hasActiveBackground: customBackgroundImage } = useBackground()
 
   const { countryList, serverCounts } = useMemo(() => {
     const list: string[] = []

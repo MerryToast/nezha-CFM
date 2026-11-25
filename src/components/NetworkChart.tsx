@@ -5,6 +5,7 @@ import { ChartConfig, ChartContainer, ChartLegend, ChartLegendContent, ChartTool
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { DETAIL_TIME_OPTIONS } from "@/hooks/use-server-detail"
 import { isDisabledProbeMetric, normalizeProbeMetric, normalizeTimestampMs } from "@/lib/cfsm-normalizer"
@@ -86,6 +87,7 @@ export function NetworkChart({
 }: NetworkChartProps) {
   const { t } = useTranslation()
   const { config, sysConfig, themeOptions } = useCfsm()
+  const { hasActiveBackground: customBackgroundImage } = useBackground()
 
   const forcePeakCut =
     themeOptions?.force_peak_cut_enabled ??
@@ -100,16 +102,16 @@ export function NetworkChart({
     setIsPeakEnabled(forcePeakCut)
   }, [forcePeakCut])
 
-  const serverId = server?.id || ""
+  const serverUid = server?.uid || server?.id || ""
 
   useEffect(() => {
     setLiveRows([])
     setActiveCharts([])
-  }, [serverId])
+  }, [serverUid])
 
   useEffect(() => {
     if (!server) return
-    const ts = server.last_updated || Date.now()
+    const ts = server.sample_timestamp || server.last_updated || Date.now()
     const snapshot: CfsmHistoryRow = {
       timestamp: ts,
       ping_ct: server.ping_ct,
@@ -137,7 +139,7 @@ export function NetworkChart({
       const next = [...prev, snapshot]
       return next.length > 180 ? next.slice(next.length - 180) : next
     })
-  }, [server, server?.last_updated])
+  }, [server, server?.sample_timestamp, server?.last_updated])
 
   const resolvedChannelLabel = useCallback(
     (key: ProbeKey): string => {
@@ -323,12 +325,6 @@ export function NetworkChart({
       </div>
     )
   }
-
-  const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
-  const customBackgroundImage =
-    Boolean(themeOptions?.custom_background_image) ||
-    Boolean(themeOptions?.custom_mobile_background_image) ||
-    (typeof win.CustomBackgroundImage === "string" && win.CustomBackgroundImage !== "")
 
   const chartConfig = channels.reduce((acc, ch) => {
     acc[ch.key] = { label: ch.label, color: ch.color }
