@@ -30,15 +30,19 @@
 
 ### 方式二：GitHub Pages / 独立静态托管（前后端分离）
 
-本仓库内置 [.github/workflows/build-dist.yml](./.github/workflows/build-dist.yml)，支持自动构建静态页面并**追加提交**到 `dist` 分支（保留触发源码提交说明，无 force push）：
+本仓库内置 [.github/workflows/build-dist.yml](./.github/workflows/build-dist.yml)，采用构建与发布分离的最小权限工作流，同时支持写入 `dist` 分支及通过 `actions/deploy-pages` 自动部署到 GitHub Pages：
 
-1. 在 GitHub 仓库打开 **Settings → Actions → General → Workflow permissions**，勾选 **Read and write permissions**（`contents: write`）。
-2. 在 **Settings → Secrets and variables → Actions** 中按需添加 Secrets：
-   - `API_BASE`（必填）：CFSM Worker 地址（如 `https://status-worker.example.com`，多后端监控用英文逗号分隔）
-   - `TITLE`（选填）：默认网页标题
-   - `BACKGROUND_IMAGE`（选填）：默认背景图片 URL
-   - `CSP_API` / `CSP_STATIC`（选填）：静态构建附加 CSP 白名单域名
-3. 在 **Settings → Pages** 中将部署源（Source）设为 `dist` 分支根目录 `/` 并保存。
+1. 在 GitHub 仓库打开 **Settings → Actions → General → Workflow permissions**，勾选 **Read and write permissions**（用于自动同步 `dist` 分支产物）。
+2. 在 **Settings → Secrets and variables → Actions** 中按需添加 Secrets 与 Variables：
+   - **Secrets**：
+     - `API_BASE`（必填）：CFSM Worker 地址（如 `https://status-worker.example.com`，多后端监控用英文逗号分隔；除本机回环地址外强制使用 `https://`）
+     - `TITLE`（选填）：默认网页标题
+     - `BACKGROUND_IMAGE` / `BACKGROUND_IMAGE_MOBILE`（选填）：默认桌面/移动端背景图片 URL（其域名会自动加入 `img-src`）
+     - `CSP_IMG`（选填）：仅追加到 `img-src` / `media-src` 的外部图床白名单域名
+     - `CSP_API` / `CSP_STATIC`（选填）：静态构建附加 API / 静态资源 CSP 白名单域名
+   - **Variables**：
+     - `DEPLOY_PAGES`：设为 `true` 后启用 GitHub Pages 自动发布（使用 `GITHUB_TOKEN` 推送 `dist` 分支不会触发旧式分支构建，请配合下方 GitHub Actions 模式）。
+3. 在 **Settings → Pages** 中将部署源（Source）设为 **GitHub Actions**（若仅使用 `dist` 分支反代则无需开启 Pages）。
 4. **⚠️ 跨域配置（必读）**：前后端分离时，必须在每个目标 CFSM Worker 的环境变量中配置 `CORS_ALLOWED_ORIGINS`（纯 Origin、英文逗号分隔，不带尾部斜杠与路径），例如：
 
    ```text

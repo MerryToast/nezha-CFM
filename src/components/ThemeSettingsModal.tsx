@@ -384,6 +384,12 @@ export default function ThemeSettingsModal({ open, onOpenChange }: ThemeSettings
             {switchItem("traffic_bar_show_billing_mode", t("themeSettings.tbMode", "进度条显示流量计费模式"), draft.traffic_bar_show_billing_mode !== false)}
             {switchItem("show_asset_card", t("themeSettings.showAssetCard", "显示右上角资产统计浮窗"), draft.show_asset_card === true)}
             {switchItem("show_visitor_capsule", t("themeSettings.showVisitorCapsule", "显示底部访客信息胶囊"), draft.show_visitor_capsule === true)}
+            <p className="text-[11px] leading-4 text-muted-foreground -mt-0.5">
+              {t(
+                "themeSettings.visitorCapsuleHint",
+                "开启后，访客浏览器将按顺序请求公共 GeoIP 接口（ipapi.co / api.ip.sb / ipwho.is）以展示网络归属信息。",
+              )}
+            </p>
             <div className="grid grid-cols-2 gap-2 pt-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs">{t("themeSettings.assetColor", "资产卡片主色")}</Label>

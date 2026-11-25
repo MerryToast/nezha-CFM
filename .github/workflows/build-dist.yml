@@ -14,16 +14,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Save source commit message
-        run: git log -1 --pretty=%B > "${RUNNER_TEMP}/commit-msg.txt"
+        run: |
+          mkdir -p "${RUNNER_TEMP}/commit-meta"
+          git log -1 --pretty=%B > "${RUNNER_TEMP}/commit-meta/commit-msg.txt"
 
       - name: Setup Node.js
         uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
@@ -44,9 +48,51 @@ jobs:
           TITLE: ${{ secrets.TITLE }}
           BACKGROUND_IMAGE: ${{ secrets.BACKGROUND_IMAGE }}
           BACKGROUND_IMAGE_MOBILE: ${{ secrets.BACKGROUND_IMAGE_MOBILE }}
+          CSP_IMG: ${{ secrets.CSP_IMG }}
           CSP_API: ${{ secrets.CSP_API }}
           CSP_STATIC: ${{ secrets.CSP_STATIC }}
         run: npm run build:github-page
+
+      - name: Upload dist bundle artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-bundle
+          path: dist/
+          retention-days: 1
+
+      - name: Upload commit message metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: commit-meta
+          path: ${{ runner.temp }}/commit-meta/commit-msg.txt
+          retention-days: 1
+
+      - name: Upload GitHub Pages artifact
+        if: ${{ vars.DEPLOY_PAGES == 'true' }}
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: dist
+
+  publish-dist:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download dist bundle artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist-bundle
+          path: ${{ runner.temp }}/dist-artifact
+
+      - name: Download commit message metadata
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: commit-meta
+          path: ${{ runner.temp }}/commit-meta
 
       - name: Append build artifacts to dist branch
         run: |
@@ -65,7 +111,7 @@ jobs:
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
 
           find . -maxdepth 1 ! -name '.' ! -name '.git' -exec rm -rf {} +
-          cp -R "${GITHUB_WORKSPACE}/dist/." .
+          cp -R "${RUNNER_TEMP}/dist-artifact/." .
 
           git add -A
           if git diff --cached --quiet; then
@@ -73,5 +119,20 @@ jobs:
             exit 0
           fi
 
-          git commit -F "${RUNNER_TEMP}/commit-msg.txt"
+          git commit -F "${RUNNER_TEMP}/commit-meta/commit-msg.txt"
           git push origin dist
+
+  deploy-pages:
+    needs: build
+    if: ${{ vars.DEPLOY_PAGES == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

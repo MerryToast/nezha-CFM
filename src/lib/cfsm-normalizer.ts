@@ -1,5 +1,6 @@
 import {
   CfsmGlobalStats,
+  CfsmHistoryRow,
   CfsmServer,
   CfsmSysConfig,
   CfsmThemeOptions,
@@ -660,6 +661,33 @@ const BLOCKED_SAMPLE_MERGE_KEYS = new Set([
   "_uptime_base_sec",
   "_uptime_base_ts",
 ])
+
+/**
+ * Build a sparse CfsmHistoryRow containing only fields explicitly present in a WS/replay sample.
+ * Prevents high-frequency CPU/RAM ticks from duplicating stale report-level metrics (e.g. ping/loss).
+ */
+export function buildLiveHistoryRowFromSample(
+  sampleData: Partial<CfsmServer>,
+  sampleTs: number,
+): CfsmHistoryRow {
+  const row: CfsmHistoryRow = {
+    timestamp: normalizeTimestampMs(sampleTs, Date.now()),
+  }
+  const rawSample = sampleData as Record<string, unknown>
+
+  for (const [key, value] of Object.entries(rawSample)) {
+    if (key === "timestamp" || BLOCKED_SAMPLE_MERGE_KEYS.has(key)) continue
+    if (value !== undefined && Object.prototype.hasOwnProperty.call(rawSample, key)) {
+      ;(row as unknown as Record<string, unknown>)[key] = value
+    }
+  }
+
+  if ("disk" in rawSample) {
+    row.disk = isValidDiskIo(rawSample.disk) ? (rawSample.disk as DiskIoMetrics) : undefined
+  }
+
+  return row
+}
 
 /**
  * Incrementally merge a WebSocket batchUpdate sample into an existing CfsmServer.

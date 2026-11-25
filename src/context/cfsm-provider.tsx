@@ -20,8 +20,10 @@ import {
   makeServerUid,
   mergeBatchSampleIntoServer,
   normalizeTimestampMs,
+  parseFiniteNumber,
   recomputeStatsFromServers,
 } from "@/lib/cfsm-normalizer"
+import { safeStorageGet } from "@/lib/safe-storage"
 import { sanitizeSafeUrl } from "@/lib/security"
 import { setTurnstileToken } from "@/lib/turnstile"
 import {
@@ -157,6 +159,7 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const liveSocketsMapRef = useRef<Map<number, LiveSocketController>>(new Map())
   const timedOutApiIndicesRef = useRef<Set<number>>(new Set())
   const pausedByUserApiIndicesRef = useRef<Set<number>>(new Set())
+  const frozenAtByApiIndexRef = useRef<Map<number, number>>(new Map())
   const closedByUserRef = useRef(false)
   const flushIntervalRef = useRef<number | null>(null)
 
@@ -179,7 +182,7 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setDefaultThemePreference(pref === "dark" ? "dark" : pref === "light" ? "light" : "system")
 
       // Language preference: only apply backend default when user hasn't explicitly picked one
-      if (!localStorage.getItem("language")) {
+      if (!safeStorageGet("language", "local")) {
         const mapped = mapCfsmLanguageToI18n(cfg.default_language)
         if (i18n.language !== mapped) {
           i18n.changeLanguage(mapped)
@@ -301,9 +304,10 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const flushServersToState = useCallback((overrideStats?: CfsmGlobalStats, overrideRegionStats?: Record<string, number>) => {
     const ts = Date.now()
     const rawList = Array.from(serversMapRef.current.values())
-    const normalized = rawList.map((srv) =>
-      cfsmServerToNezhaServer(srv, ts, srv.sysConfig ?? sysConfigRef.current, themeOptionsRef.current),
-    )
+    const normalized = rawList.map((srv) => {
+      const evalTs = frozenAtByApiIndexRef.current.get(srv.apiIndex ?? 0) ?? ts
+      return cfsmServerToNezhaServer(srv, evalTs, srv.sysConfig ?? sysConfigRef.current, themeOptionsRef.current)
+    })
     const nextOnlineMap = new Map<string, boolean>()
     for (const srv of normalized) {
       nextOnlineMap.set(srv.uid, srv.online)
@@ -315,10 +319,41 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (overrideStats && overrideRegionStats) {
       setStats(overrideStats)
       setRegionStats(overrideRegionStats)
-    } else {
+    } else if (frozenAtByApiIndexRef.current.size === 0) {
       const computed = recomputeStatsFromServers(rawList, ts)
       setStats(computed.stats)
       setRegionStats(computed.regionStats)
+    } else {
+      let online = 0
+      let globalSpeedIn = 0
+      let globalSpeedOut = 0
+      let globalNetRx = 0
+      let globalNetTx = 0
+      const computedRegionStats: Record<string, number> = {}
+      for (const srv of rawList) {
+        const evalTs = frozenAtByApiIndexRef.current.get(srv.apiIndex ?? 0) ?? ts
+        if (isCfsmServerOnline(srv, evalTs)) {
+          online += 1
+          globalSpeedIn += parseFiniteNumber(srv.net_in_speed, 0)
+          globalSpeedOut += parseFiniteNumber(srv.net_out_speed, 0)
+        }
+        globalNetRx += parseFiniteNumber(srv.net_rx, 0)
+        globalNetTx += parseFiniteNumber(srv.net_tx, 0)
+        const regionCode = String(srv.region || "").trim().toUpperCase()
+        if (regionCode && regionCode !== "XX") {
+          computedRegionStats[regionCode] = (computedRegionStats[regionCode] || 0) + 1
+        }
+      }
+      setStats({
+        total: rawList.length,
+        online,
+        offline: rawList.length - online,
+        globalSpeedIn,
+        globalSpeedOut,
+        globalNetTx,
+        globalNetRx,
+      })
+      setRegionStats(computedRegionStats)
     }
   }, [])
 
@@ -347,9 +382,20 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setWsConnected(anyConnected)
   }, [])
 
+  const getAllSiteIndices = useCallback((): number[] => {
+    const bases = getApiBases()
+    return bases.length > 0 ? bases.map((_, idx) => idx) : [0]
+  }, [])
+
+  const getActiveSiteIndices = useCallback((): number[] => {
+    return getAllSiteIndices().filter(
+      (idx) => !pausedByUserApiIndicesRef.current.has(idx) && !timedOutApiIndicesRef.current.has(idx),
+    )
+  }, [getAllSiteIndices])
+
   const startDashboardSockets = useCallback(
     (targetIndices?: number[]) => {
-      if (closedByUserRef.current) return
+      if (getActiveSiteIndices().length === 0) return
       if (typeof document !== "undefined" && document.hidden) {
         stopDashboardSockets()
         return
@@ -419,6 +465,7 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
               liveSocketsMapRef.current.delete(apiIndex)
             }
             timedOutApiIndicesRef.current.add(apiIndex)
+            frozenAtByApiIndexRef.current.set(apiIndex, Date.now())
             const anyConnected = Array.from(liveSocketsMapRef.current.values()).some((c) => c.isConnected())
             setWsConnected(anyConnected)
             setWsTimeoutMinutes(siteTimeoutMinutes)
@@ -428,7 +475,7 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
         liveSocketsMapRef.current.set(apiIndex, ctrl)
       }
     },
-    [stopDashboardSockets],
+    [getActiveSiteIndices, stopDashboardSockets],
   )
 
   const loadDashboardServers = useCallback(
@@ -618,27 +665,37 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const continueLiveConnection = useCallback(() => {
     const timedOutTargets = Array.from(timedOutApiIndicesRef.current)
     timedOutApiIndicesRef.current.clear()
-    timedOutTargets.forEach((idx) => pausedByUserApiIndicesRef.current.delete(idx))
+    timedOutTargets.forEach((idx) => {
+      pausedByUserApiIndicesRef.current.delete(idx)
+      frozenAtByApiIndexRef.current.delete(idx)
+      pendingSyncApiIndicesRef.current.add(idx)
+    })
     closedByUserRef.current = false
     wsTimedOutRef.current = false
     setWsTimedOut(false)
     if (dashboardMountedCountRef.current > 0) {
-      startDashboardSockets(timedOutTargets.length > 0 ? timedOutTargets : undefined)
+      if (timedOutTargets.length > 0) {
+        void loadDashboardServersRef.current(timedOutTargets)
+      } else {
+        startDashboardSockets()
+      }
     }
   }, [startDashboardSockets])
 
   const closeLiveConnection = useCallback(() => {
+    const nowTs = Date.now()
     timedOutApiIndicesRef.current.forEach((idx) => {
       pausedByUserApiIndicesRef.current.add(idx)
+      if (!frozenAtByApiIndexRef.current.has(idx)) {
+        frozenAtByApiIndexRef.current.set(idx, nowTs)
+      }
       stopDashboardSockets([idx])
     })
     timedOutApiIndicesRef.current.clear()
     wsTimedOutRef.current = false
     setWsTimedOut(false)
-    if (liveSocketsMapRef.current.size === 0) {
-      closedByUserRef.current = true
-    }
-  }, [stopDashboardSockets])
+    closedByUserRef.current = getActiveSiteIndices().length === 0
+  }, [getActiveSiteIndices, stopDashboardSockets])
 
   const loadDashboardServersRef = useRef(loadDashboardServers)
   loadDashboardServersRef.current = loadDashboardServers
@@ -661,7 +718,8 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           const ts = Date.now()
           for (const srv of serversMapRef.current.values()) {
-            const expectedOnline = isCfsmServerOnline(srv, ts)
+            const evalTs = frozenAtByApiIndexRef.current.get(srv.apiIndex ?? 0) ?? ts
+            const expectedOnline = isCfsmServerOnline(srv, evalTs)
             const uid = makeServerUid(srv.apiIndex, srv.id)
             if (renderedOnlineMapRef.current.get(uid) !== expectedOnline) {
               flushServersToState()
@@ -702,19 +760,27 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [configReady, privateRequired, turnstileRequired])
 
-  // Handle Page Visibility on Dashboard: close WS when hidden, catch up REST + reconnect when visible
+  // Handle Page Visibility on Dashboard: close WS when hidden, catch up REST + reconnect healthy sites when visible
   useEffect(() => {
     const onVisibilityChange = () => {
       if (dashboardMountedCountRef.current <= 0) return
       if (document.hidden) {
         stopDashboardSockets()
-      } else if (!wsTimedOutRef.current && !closedByUserRef.current && configReady && !turnstileRequired && !privateRequired) {
-        void loadDashboardServersRef.current(undefined, true)
+      } else if (configReady && !turnstileRequired && !privateRequired) {
+        const allIndices = getAllSiteIndices()
+        const activeIndices = getActiveSiteIndices()
+        if (activeIndices.length === 0) return
+        if (activeIndices.length === allIndices.length) {
+          void loadDashboardServersRef.current(undefined, true)
+        } else {
+          activeIndices.forEach((idx) => pendingSyncApiIndicesRef.current.add(idx))
+          void loadDashboardServersRef.current(activeIndices)
+        }
       }
     }
     document.addEventListener("visibilitychange", onVisibilityChange)
     return () => document.removeEventListener("visibilitychange", onVisibilityChange)
-  }, [configReady, privateRequired, stopDashboardSockets, turnstileRequired])
+  }, [configReady, getActiveSiteIndices, getAllSiteIndices, privateRequired, stopDashboardSockets, turnstileRequired])
 
   const value: CfsmContextValue = {
     config,

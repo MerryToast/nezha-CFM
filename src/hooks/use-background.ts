@@ -1,3 +1,4 @@
+import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage"
 import { sanitizeSafeUrl } from "@/lib/security"
 import { CfsmThemeOptions } from "@/types/cfsm"
 import { useCallback, useEffect, useState } from "react"
@@ -51,14 +52,8 @@ function computeSnapshot(): BackgroundSnapshot {
     return { desktopRaw: "", mobileRaw: "", hasBodyBg: false, hidden: false }
   }
 
-  let hidden = false
-  let savedDesktop = ""
-  try {
-    hidden = sessionStorage.getItem(BG_HIDDEN_SESSION_KEY) === "1"
-    savedDesktop = sanitizeSafeUrl(sessionStorage.getItem("savedBackgroundImage"), { allowHash: false })
-  } catch {
-    // ignore storage errors
-  }
+  const hidden = safeStorageGet(BG_HIDDEN_SESSION_KEY, "session") === "1"
+  const savedDesktop = sanitizeSafeUrl(safeStorageGet("savedBackgroundImage", "session"), { allowHash: false })
 
   const opts = window.__cfsmThemeOptions
   const desktopRaw =
@@ -117,15 +112,11 @@ export function useBackground() {
 
   const updateBackground = useCallback((newBackground: string | undefined) => {
     const safe = sanitizeSafeUrl(newBackground, { allowHash: false })
-    try {
-      if (safe) {
-        sessionStorage.removeItem(BG_HIDDEN_SESSION_KEY)
-        sessionStorage.setItem("savedBackgroundImage", safe)
-      } else {
-        sessionStorage.setItem(BG_HIDDEN_SESSION_KEY, "1")
-      }
-    } catch {
-      // ignore storage errors
+    if (safe) {
+      safeStorageRemove(BG_HIDDEN_SESSION_KEY, "session")
+      safeStorageSet("savedBackgroundImage", safe, "session")
+    } else {
+      safeStorageSet(BG_HIDDEN_SESSION_KEY, "1", "session")
     }
     window.CustomBackgroundImage = safe
     window.dispatchEvent(new Event(BACKGROUND_CHANGE_EVENT))
@@ -134,17 +125,13 @@ export function useBackground() {
   const toggleBackground = useCallback(() => {
     const current = cachedSnapshot ?? computeSnapshot()
     const nextHidden = !current.hidden
-    try {
-      if (nextHidden) {
-        if (current.desktopRaw) {
-          sessionStorage.setItem("savedBackgroundImage", current.desktopRaw)
-        }
-        sessionStorage.setItem(BG_HIDDEN_SESSION_KEY, "1")
-      } else {
-        sessionStorage.removeItem(BG_HIDDEN_SESSION_KEY)
+    if (nextHidden) {
+      if (current.desktopRaw) {
+        safeStorageSet("savedBackgroundImage", current.desktopRaw, "session")
       }
-    } catch {
-      // ignore storage errors
+      safeStorageSet(BG_HIDDEN_SESSION_KEY, "1", "session")
+    } else {
+      safeStorageRemove(BG_HIDDEN_SESSION_KEY, "session")
     }
     window.CustomBackgroundImage = nextHidden ? "" : current.desktopRaw
     window.dispatchEvent(new Event(BACKGROUND_CHANGE_EVENT))

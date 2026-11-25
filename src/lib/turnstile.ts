@@ -1,3 +1,5 @@
+import { safeStorageGet, safeStorageRemove, safeStorageRemoveByPrefix, safeStorageSet } from "@/lib/safe-storage"
+
 export const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js"
 
 export const STORAGE_KEYS = {
@@ -45,63 +47,117 @@ function verifiedKeyForScope(baseUrl?: string): string {
 }
 
 export function getTurnstileToken(baseUrl?: string): string {
-  try {
-    return localStorage.getItem(tokenKeyForScope(baseUrl)) || ""
-  } catch {
-    return ""
-  }
+  return safeStorageGet(tokenKeyForScope(baseUrl), "local") || ""
 }
 
 export function setTurnstileToken(token: string, baseUrl?: string): void {
-  try {
-    if (token) localStorage.setItem(tokenKeyForScope(baseUrl), token)
-  } catch {
-    // ignore storage errors
-  }
+  if (token) safeStorageSet(tokenKeyForScope(baseUrl), token, "local")
 }
 
 export function getTurnstileVerified(baseUrl?: string): string {
-  try {
-    return localStorage.getItem(verifiedKeyForScope(baseUrl)) || ""
-  } catch {
-    return ""
-  }
+  return safeStorageGet(verifiedKeyForScope(baseUrl), "local") || ""
 }
 
 export function setTurnstileVerified(verified: string, baseUrl?: string): void {
-  try {
-    if (verified) localStorage.setItem(verifiedKeyForScope(baseUrl), verified)
-  } catch {
-    // ignore storage errors
-  }
+  if (verified) safeStorageSet(verifiedKeyForScope(baseUrl), verified, "local")
 }
 
 export function clearTurnstileStorage(baseUrl?: string): void {
-  try {
-    if (baseUrl !== undefined) {
-      localStorage.removeItem(tokenKeyForScope(baseUrl))
-      localStorage.removeItem(verifiedKeyForScope(baseUrl))
+  if (baseUrl !== undefined) {
+    safeStorageRemove(tokenKeyForScope(baseUrl), "local")
+    safeStorageRemove(verifiedKeyForScope(baseUrl), "local")
+    return
+  }
+  // Clear legacy unscoped keys and all scoped Turnstile keys when invoked without a target base
+  safeStorageRemove(STORAGE_KEYS.TURNSTILE_TOKEN, "local")
+  safeStorageRemove(STORAGE_KEYS.TURNSTILE_VERIFIED, "local")
+  safeStorageRemoveByPrefix(`${STORAGE_KEYS.TURNSTILE_TOKEN}:`, "local")
+  safeStorageRemoveByPrefix(`${STORAGE_KEYS.TURNSTILE_VERIFIED}:`, "local")
+}
+
+function isTurnstileReady(): boolean {
+  return typeof window !== "undefined" && typeof window.turnstile?.render === "function"
+}
+
+function waitForTurnstileReady(
+  scriptEl: Element,
+  onReady: () => void,
+  onFail: (err: unknown) => void,
+  timeoutMs = 10_000,
+): () => void {
+  let settled = false
+  let pollTimer: number | null = null
+  let timeoutTimer: number | null = null
+
+  const cleanup = () => {
+    scriptEl.removeEventListener("load", handleLoad)
+    scriptEl.removeEventListener("error", handleError)
+    if (pollTimer !== null) {
+      window.clearInterval(pollTimer)
+      pollTimer = null
+    }
+    if (timeoutTimer !== null) {
+      window.clearTimeout(timeoutTimer)
+      timeoutTimer = null
+    }
+  }
+
+  const succeed = () => {
+    if (settled) return
+    settled = true
+    cleanup()
+    onReady()
+  }
+
+  const fail = (err: unknown) => {
+    if (settled) return
+    settled = true
+    cleanup()
+    onFail(err)
+  }
+
+  const handleLoad = () => {
+    if (isTurnstileReady()) {
+      succeed()
       return
     }
-    // Clear legacy unscoped keys and all scoped Turnstile keys when invoked without a target base
-    localStorage.removeItem(STORAGE_KEYS.TURNSTILE_TOKEN)
-    localStorage.removeItem(STORAGE_KEYS.TURNSTILE_VERIFIED)
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const k = localStorage.key(i)
-      if (
-        k &&
-        (k.startsWith(`${STORAGE_KEYS.TURNSTILE_TOKEN}:`) || k.startsWith(`${STORAGE_KEYS.TURNSTILE_VERIFIED}:`))
-      ) {
-        localStorage.removeItem(k)
-      }
+    const deadline = Date.now() + 2_000
+    if (pollTimer === null) {
+      pollTimer = window.setInterval(() => {
+        if (isTurnstileReady()) {
+          succeed()
+        } else if (Date.now() >= deadline) {
+          fail(new Error("Turnstile render API unavailable"))
+        }
+      }, 50)
     }
-  } catch {
-    // ignore storage errors
   }
+
+  const handleError = (err: Event) => {
+    fail(err)
+  }
+
+  if (isTurnstileReady()) {
+    succeed()
+    return cleanup
+  }
+
+  scriptEl.addEventListener("load", handleLoad, { once: true })
+  scriptEl.addEventListener("error", handleError, { once: true })
+  pollTimer = window.setInterval(() => {
+    if (isTurnstileReady()) {
+      succeed()
+    }
+  }, 50)
+  timeoutTimer = window.setTimeout(() => {
+    fail(new Error("Turnstile script load timeout"))
+  }, timeoutMs)
+
+  return cleanup
 }
 
 export function loadTurnstileScript(): Promise<void> {
-  if (typeof window !== "undefined" && window.turnstile) {
+  if (isTurnstileReady()) {
     return Promise.resolve()
   }
   if (turnstileScriptPromise) {
@@ -111,69 +167,38 @@ export function loadTurnstileScript(): Promise<void> {
   turnstileScriptPromise = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`)
     if (existing) {
-      let settled = false
-      let pollTimer: number | null = null
-      let timeoutTimer: number | null = null
-
-      const cleanup = () => {
-        existing.removeEventListener("load", onLoad)
-        existing.removeEventListener("error", onError)
-        if (pollTimer !== null) {
-          window.clearInterval(pollTimer)
-          pollTimer = null
-        }
-        if (timeoutTimer !== null) {
-          window.clearTimeout(timeoutTimer)
-          timeoutTimer = null
-        }
-      }
-
-      const onLoad = () => {
-        if (settled) return
-        settled = true
-        cleanup()
-        resolve()
-      }
-
-      const onError = (err: Event) => {
-        if (settled) return
-        settled = true
-        cleanup()
-        turnstileScriptPromise = null
-        reject(err)
-      }
-
-      if (window.turnstile) {
-        onLoad()
+      if (existing.getAttribute("data-cfsm-turnstile-failed") === "1") {
+        existing.remove()
+      } else {
+        waitForTurnstileReady(
+          existing,
+          () => resolve(),
+          (err) => {
+            existing.setAttribute("data-cfsm-turnstile-failed", "1")
+            existing.remove()
+            turnstileScriptPromise = null
+            reject(err)
+          },
+        )
         return
       }
-
-      existing.addEventListener("load", onLoad, { once: true })
-      existing.addEventListener("error", onError, { once: true })
-      pollTimer = window.setInterval(() => {
-        if (window.turnstile) {
-          onLoad()
-        }
-      }, 50)
-      timeoutTimer = window.setTimeout(() => {
-        if (settled) return
-        settled = true
-        cleanup()
-        turnstileScriptPromise = null
-        reject(new Error("Turnstile script load timeout"))
-      }, 10_000)
-      return
     }
 
     const script = document.createElement("script")
     script.src = TURNSTILE_SCRIPT_SRC
     script.async = true
     script.defer = true
-    script.onload = () => resolve()
-    script.onerror = (err) => {
-      turnstileScriptPromise = null
-      reject(err)
-    }
+    script.setAttribute("data-cfsm-turnstile", "1")
+    waitForTurnstileReady(
+      script,
+      () => resolve(),
+      (err) => {
+        script.setAttribute("data-cfsm-turnstile-failed", "1")
+        script.remove()
+        turnstileScriptPromise = null
+        reject(err)
+      },
+    )
     document.head.appendChild(script)
   })
 

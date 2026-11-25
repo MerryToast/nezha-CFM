@@ -269,6 +269,7 @@
     "tbMode": "进度条显示流量计费模式",
     "showAssetCard": "显示右上角资产统计浮窗",
     "showVisitorCapsule": "显示底部访客信息胶囊",
+    "visitorCapsuleHint": "开启后，访客浏览器将按顺序请求公共 GeoIP 接口（ipapi.co / api.ip.sb / ipwho.is）以展示网络归属信息。",
     "assetColor": "资产卡片主色",
     "capsuleColor": "访客胶囊主色",
     "assetCurrency": "资产默认币种",

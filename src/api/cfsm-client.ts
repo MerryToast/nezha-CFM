@@ -1,3 +1,4 @@
+import { safeStorageGet, safeStorageRemove, safeStorageRemoveByPrefix } from "@/lib/safe-storage"
 import { sanitizeSafeUrl } from "@/lib/security"
 import {
   STORAGE_KEYS,
@@ -57,12 +58,24 @@ function stripTrailingSlash(value: string): string {
   return String(value || "").replace(/\/+$/, "")
 }
 
-function normalizeSafeApiOrigin(raw: string): string {
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = String(hostname || "").toLowerCase()
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "[::1]" || normalized === "::1"
+}
+
+function normalizeSafeApiOrigin(raw: string, allowAnyHttpSameOrigin = false): string {
   const trimmed = String(raw || "").trim()
   if (!trimmed || /[\s;"'<>]/.test(trimmed)) return ""
   try {
     const parsed = new URL(trimmed)
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    const isSameWindowOrigin =
+      typeof window !== "undefined" &&
+      Boolean(window.location?.origin) &&
+      stripTrailingSlash(parsed.origin) === stripTrailingSlash(window.location.origin)
+    const allowHttp =
+      parsed.protocol === "http:" &&
+      (isLoopbackHostname(parsed.hostname) || (allowAnyHttpSameOrigin && isSameWindowOrigin))
+    if (parsed.protocol !== "https:" && !allowHttp) {
       return ""
     }
     return stripTrailingSlash(parsed.origin)
@@ -80,7 +93,7 @@ export function initApiBases(): string[] {
     if (meta) {
       const parsed = meta
         .split(",")
-        .map((s) => normalizeSafeApiOrigin(s))
+        .map((s) => normalizeSafeApiOrigin(s, true))
         .filter(Boolean)
       if (parsed.length > 0) {
         hasExplicitMetaBases = true
@@ -90,7 +103,7 @@ export function initApiBases(): string[] {
     }
   }
   hasExplicitMetaBases = false
-  const origin = typeof window !== "undefined" ? normalizeSafeApiOrigin(window.location.origin) : ""
+  const origin = typeof window !== "undefined" ? normalizeSafeApiOrigin(window.location.origin, true) : ""
   cachedBases = origin ? [origin] : []
   return cachedBases
 }
@@ -109,6 +122,20 @@ export function hasConfiguredApiBase(): boolean {
 
 export function hasMultipleApiBases(): boolean {
   return getApiBases().length > 1
+}
+
+export function isValidApiIndex(apiIndex: number): boolean {
+  if (!Number.isInteger(apiIndex) || apiIndex < 0) return false
+  if (USE_MOCK) return apiIndex === 0
+  const bases = getApiBases()
+  return apiIndex < Math.max(1, bases.length)
+}
+
+function requireBaseUrlForIndex(apiIndex: number): string {
+  if (!isValidApiIndex(apiIndex)) {
+    throw new CfsmApiError("Server endpoint not found", 404, "INVALID_API_INDEX")
+  }
+  return getApiBases()[apiIndex] ?? ""
 }
 
 export function getAdminEntryUrl(apiIndex = 0): string {
@@ -154,45 +181,31 @@ function resolveOriginScope(baseUrl?: string): { origin: string; isSameOrigin: b
 }
 
 export function getJwtToken(baseUrl?: string): string {
-  try {
-    const { origin, isSameOrigin } = resolveOriginScope(baseUrl)
-    const scoped = localStorage.getItem(`${STORAGE_KEYS.JWT_TOKEN}:${origin}`)
-    if (scoped) return scoped
-    // Only fall back to unscoped jwt_token on same-origin deployments (written by /admin login)
-    if (isSameOrigin) {
-      return localStorage.getItem(STORAGE_KEYS.JWT_TOKEN) || ""
-    }
-    return ""
-  } catch {
-    return ""
+  const { origin, isSameOrigin } = resolveOriginScope(baseUrl)
+  const scoped = safeStorageGet(`${STORAGE_KEYS.JWT_TOKEN}:${origin}`, "local")
+  if (scoped) return scoped
+  // Only fall back to unscoped jwt_token on same-origin deployments (written by /admin login)
+  if (isSameOrigin) {
+    return safeStorageGet(STORAGE_KEYS.JWT_TOKEN, "local") || ""
   }
+  return ""
 }
 
 export function clearJwtToken(baseUrl?: string): void {
-  try {
-    if (baseUrl !== undefined) {
-      const { origin, isSameOrigin } = resolveOriginScope(baseUrl)
-      localStorage.removeItem(`${STORAGE_KEYS.JWT_TOKEN}:${origin}`)
-      if (isSameOrigin) {
-        localStorage.removeItem(STORAGE_KEYS.JWT_TOKEN)
-      }
-      return
+  if (baseUrl !== undefined) {
+    const { origin, isSameOrigin } = resolveOriginScope(baseUrl)
+    safeStorageRemove(`${STORAGE_KEYS.JWT_TOKEN}:${origin}`, "local")
+    if (isSameOrigin) {
+      safeStorageRemove(STORAGE_KEYS.JWT_TOKEN, "local")
     }
-    localStorage.removeItem(STORAGE_KEYS.JWT_TOKEN)
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const k = localStorage.key(i)
-      if (k && k.startsWith(`${STORAGE_KEYS.JWT_TOKEN}:`)) {
-        localStorage.removeItem(k)
-      }
-    }
-  } catch {
-    // ignore
+    return
   }
+  safeStorageRemove(STORAGE_KEYS.JWT_TOKEN, "local")
+  safeStorageRemoveByPrefix(`${STORAGE_KEYS.JWT_TOKEN}:`, "local")
 }
 
 export function buildWsUrl(subscribe: string, apiIndex = 0): string {
-  const bases = getApiBases()
-  const base = bases[apiIndex] || bases[0] || (typeof window !== "undefined" ? window.location.origin : "")
+  const base = requireBaseUrlForIndex(apiIndex) || (typeof window !== "undefined" ? window.location.origin : "")
   let url: URL
   try {
     const parsed = new URL(base)
@@ -210,7 +223,7 @@ export function buildWsUrl(subscribe: string, apiIndex = 0): string {
   const sameHost = typeof window !== "undefined" && url.host === window.location.host
   const siteCfg = getSiteConfigByIndex(apiIndex)
   if (!sameHost && siteCfg?.is_public !== true) {
-    const isLocalhost = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+    const isLocalhost = isLoopbackHostname(url.hostname)
     if (url.protocol === "wss:" || isLocalhost) {
       const token = getJwtToken(base)
       if (token) {
@@ -272,6 +285,20 @@ async function fetchCFSM<T>(endpoint: string, options: FetchOptions = {}): Promi
 
   const base = stripTrailingSlash(baseUrl ?? getApiBases()[0] ?? "")
   const { isSameOrigin } = resolveOriginScope(base)
+  if (base) {
+    try {
+      const parsedBase = new URL(base)
+      if (
+        parsedBase.protocol !== "https:" &&
+        !(parsedBase.protocol === "http:" && (isSameOrigin || isLoopbackHostname(parsedBase.hostname)))
+      ) {
+        throw new CfsmApiError("Insecure HTTP API endpoint is not allowed", 0, "INSECURE_TRANSPORT", base)
+      }
+    } catch (err) {
+      if (err instanceof CfsmApiError) throw err
+      throw new CfsmApiError("Invalid API endpoint", 0, "INVALID_ENDPOINT", base)
+    }
+  }
   const headers: Record<string, string> = {}
   if (body !== undefined) {
     headers["Content-Type"] = "application/json"
@@ -360,18 +387,10 @@ async function fetchCFSM<T>(endpoint: string, options: FetchOptions = {}): Promi
     const data = (await res.json()) as T & { turnstile_verified?: string | null }
     if (data && typeof data === "object" && "turnstile_verified" in data && data.turnstile_verified) {
       setTurnstileVerified(data.turnstile_verified, base)
-      try {
-        localStorage.removeItem(STORAGE_KEYS.TURNSTILE_TOKEN)
-      } catch {
-        // ignore
-      }
+      safeStorageRemove(STORAGE_KEYS.TURNSTILE_TOKEN, "local")
       // Clear single-use token after backend issued reusable verified ticket
       const key = `${STORAGE_KEYS.TURNSTILE_TOKEN}:${base || (typeof window !== "undefined" ? window.location.origin : "default")}`
-      try {
-        localStorage.removeItem(key)
-      } catch {
-        // ignore
-      }
+      safeStorageRemove(key, "local")
     }
     return data
   } catch (err) {
@@ -785,8 +804,7 @@ export async function fetchServerDetail(id: string, apiIndex = 0): Promise<CfsmS
     const cachedSys = siteSysConfigsByIndex.get(apiIndex)
     return cachedSys ? { ...srv, apiIndex, sysConfig: { ...cachedSys, ...(srv.sysConfig || {}) } } : srv
   }
-  const bases = getApiBases()
-  const baseUrl = bases[apiIndex] || bases[0] || ""
+  const baseUrl = requireBaseUrlForIndex(apiIndex)
   const data = await fetchCFSM<CfsmServer>(`/api/server?id=${encodeURIComponent(id)}`, { baseUrl })
   const siteCfg = getSiteConfigByIndex(apiIndex) || cachedSiteConfig
   const cachedSiteSysCfg = siteSysConfigsByIndex.get(apiIndex)
@@ -838,8 +856,7 @@ export async function fetchServerHistory(
     return rows
   }
 
-  const bases = getApiBases()
-  const baseUrl = bases[apiIndex] || bases[0] || ""
+  const baseUrl = requireBaseUrlForIndex(apiIndex)
   const targetSiteCfg = getSiteConfigByIndex(apiIndex) || cachedSiteConfig
   // On public sites, hours > 24 returns 401 by CFSM design; handle locally in detail view without triggering global private lock
   const isPublicSite = targetSiteCfg?.is_public !== false

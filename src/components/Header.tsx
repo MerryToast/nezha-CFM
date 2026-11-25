@@ -5,6 +5,7 @@ import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
+import { safeStorageRemove } from "@/lib/safe-storage"
 import { sanitizeSafeUrl } from "@/lib/security"
 import { cn } from "@/lib/utils"
 import NumberFlow, { NumberFlowGroup } from "@number-flow/react"
@@ -81,7 +82,7 @@ function Header() {
       <section className="flex items-center justify-between header-top">
         <section
           onClick={() => {
-            sessionStorage.removeItem("selectedGroup")
+            safeStorageRemove("selectedGroup", "session")
             navigate("/")
           }}
           className="cursor-pointer flex items-center sm:text-base text-sm font-medium min-w-0"

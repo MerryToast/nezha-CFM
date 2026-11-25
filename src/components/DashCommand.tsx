@@ -2,6 +2,7 @@ import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, C
 import { useCfsm } from "@/hooks/use-cfsm"
 import { useCommand } from "@/hooks/use-command"
 import { useTheme } from "@/hooks/use-theme"
+import { safeStorageSet } from "@/lib/safe-storage"
 import { formatNezhaInfo } from "@/lib/utils"
 import { Home, Moon, Sun, SunMoon } from "lucide-react"
 import { useEffect, useState } from "react"
@@ -72,13 +73,9 @@ export function DashCommand() {
                 value={`${server.name} ${server.server_group} ${server.tags} ${server.uid || server.id}`}
                 onSelect={() => {
                   const onHome = location.pathname === "/"
-                  try {
-                    if (onHome) {
-                      sessionStorage.setItem("fromMainPage", "true")
-                      sessionStorage.setItem("scrollPosition", String(window.scrollY || 0))
-                    }
-                  } catch {
-                    // ignore storage errors
+                  if (onHome) {
+                    safeStorageSet("fromMainPage", "true", "session")
+                    safeStorageSet("scrollPosition", String(window.scrollY || 0), "session")
                   }
                   const query = server.apiIndex ? `?apiIndex=${server.apiIndex}` : ""
                   navigate(`/server/${encodeURIComponent(server.id)}${query}`, {

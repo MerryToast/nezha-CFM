@@ -6,6 +6,7 @@ import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { formatBytes } from "@/lib/format"
 import { GetOsName, OsIcon } from "@/lib/logo-class"
+import { safeStorageSet } from "@/lib/safe-storage"
 import { calcTrafficUsed, cn, formatNezhaInfo, parsePublicNote } from "@/lib/utils"
 import { NezhaServer } from "@/types/nezha-api"
 import { useTranslation } from "react-i18next"
@@ -43,12 +44,8 @@ export default function ServerCardInline({ now, serverInfo }: { now: number; ser
   } = formatNezhaInfo(now, serverInfo)
 
   const cardClick = () => {
-    try {
-      sessionStorage.setItem("fromMainPage", "true")
-      sessionStorage.setItem("scrollPosition", String(window.scrollY || 0))
-    } catch {
-      // ignore storage errors
-    }
+    safeStorageSet("fromMainPage", "true", "session")
+    safeStorageSet("scrollPosition", String(window.scrollY || 0), "session")
     const query = serverInfo.apiIndex ? `?apiIndex=${serverInfo.apiIndex}` : ""
     navigate(`/server/${encodeURIComponent(serverInfo.id)}${query}`)
   }

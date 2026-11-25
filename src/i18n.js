@@ -1,6 +1,7 @@
 import i18n from "i18next"
 import { initReactI18next } from "react-i18next"
 
+import { safeStorageGet } from "./lib/safe-storage"
 import deTranslation from "./locales/de/translation.json"
 import enTranslation from "./locales/en/translation.json"
 import esTranslation from "./locales/es/translation.json"
@@ -34,10 +35,8 @@ const resources = {
 }
 
 const getStoredLanguage = () => {
-  if (typeof localStorage !== "undefined") {
-    const saved = localStorage.getItem("language")
-    if (saved && saved in resources) return saved
-  }
+  const saved = safeStorageGet("language", "local")
+  if (saved && saved in resources) return saved
   return "zh-CN"
 }
 

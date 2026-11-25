@@ -18,8 +18,13 @@ export default function ServerDetail() {
   const [searchParams] = useSearchParams()
 
   const decodedId = id ? decodeURIComponent(id) : ""
-  const apiIndexRaw = Number(searchParams.get("apiIndex") || "0")
-  const apiIndex = Number.isFinite(apiIndexRaw) && apiIndexRaw >= 0 ? apiIndexRaw : 0
+  const rawApiIndex = searchParams.get("apiIndex")
+  const apiIndex =
+    rawApiIndex === null
+      ? 0
+      : /^\d+$/.test(rawApiIndex.trim())
+        ? Number(rawApiIndex.trim())
+        : -1
 
   const tabs = ["Detail", "Network"]
   const [currentTab, setCurrentTab] = useState(tabs[0])

@@ -1,5 +1,6 @@
 import { useCfsm } from "@/hooks/use-cfsm"
 import { isDisabledProbeMetric, normalizeProbeMetric, normalizeTimestampMs } from "@/lib/cfsm-normalizer"
+import { safeStorageSet } from "@/lib/safe-storage"
 import { NezhaServer } from "@/types/nezha-api"
 import { ExclamationTriangleIcon } from "@heroicons/react/20/solid"
 import { useMemo, useState } from "react"
@@ -195,12 +196,8 @@ export function ServiceTracker({ serverList }: { serverList: NezhaServer[] }) {
             avgLoss={avgLoss}
             windowHours={sysConfig.latency_window?.hours ?? 2}
             onClick={() => {
-              try {
-                sessionStorage.setItem("fromMainPage", "true")
-                sessionStorage.setItem("scrollPosition", String(window.scrollY || 0))
-              } catch {
-                // ignore storage errors
-              }
+              safeStorageSet("fromMainPage", "true", "session")
+              safeStorageSet("scrollPosition", String(window.scrollY || 0), "session")
               const query = server.apiIndex ? `?apiIndex=${server.apiIndex}` : ""
               navigate(`/server/${encodeURIComponent(server.id)}${query}`)
             }}
