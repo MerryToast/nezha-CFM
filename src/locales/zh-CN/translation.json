@@ -7,6 +7,10 @@
   "offline": "离线",
   "whereTheTimeIs": "当前时间",
   "refreshing": "刷新中",
+  "loading": "加载历史数据中...",
+  "cancel": "取消",
+  "saving": "保存中...",
+  "toggleBackground": "切换背景",
   "info": {
     "websocketConnecting": "WebSocket 连接中",
     "websocketConnected": "WebSocket 连接成功",
@@ -49,7 +53,10 @@
     "delay": "延迟",
     "daysAgo": "天前",
     "today": "今天",
-    "loading": "加载中..."
+    "loading": "加载中...",
+    "disabledInBackend": "三网延迟详情未开启，请在 CFSM 管理后台开启「显示三网详情」",
+    "threeNetWindow": "三网延迟与丢包监测",
+    "allLines": "全部线路"
   },
   "serverDetail": {
     "status": "状态",
@@ -69,7 +76,11 @@
     "download": "下载",
     "lastActive": "最后上报时间",
     "temperature": "温度",
-    "bootTime": "启动时间"
+    "bootTime": "启动时间",
+    "notFound": "未找到该服务器节点或无权访问",
+    "loginHistoryPrompt": "登录后台查看完整历史",
+    "monthlyTraffic": "本月流量 (↑ / ↓)",
+    "diskIo": "磁盘 IO"
   },
   "serverDetailChart": {
     "process": "进程数",
@@ -77,7 +88,11 @@
     "mem": "内存",
     "swap": "虚拟内存",
     "upload": "上传",
-    "download": "下载"
+    "download": "下载",
+    "network": "网络",
+    "connect": "连接数",
+    "load": "系统负载",
+    "diskIo": "磁盘 IO"
   },
   "footer": {
     "themeBy": "主题-"
@@ -99,18 +114,30 @@
   },
   "error": {
     "pageNotFound": "页面不存在",
-    "backToHome": "回到主页"
+    "backToHome": "回到主页",
+    "somethingWentWrong": "应用程序发生错误"
   },
   "tabSwitch": {
     "Detail": "详情",
     "Network": "网络"
   },
   "monitor": {
-    "noData": "没有服务监控数据，请在管理后台服务页添加监控任务",
+    "noData": "该服务器未配置延迟检测",
     "avgDelay": "延迟",
     "monitorCount": "个监控服务",
     "packetLoss": "丢包率",
-    "clearSelections": "清除"
+    "clearSelections": "清除",
+    "ct": "电信",
+    "cu": "联通",
+    "cm": "移动",
+    "bd": "广电",
+    "node1": "节点 1",
+    "node2": "节点 2",
+    "node3": "节点 3",
+    "node4": "节点 4",
+    "timeout": "超时",
+    "avgLoss": "平均丢包",
+    "lossShort": "丢包"
   },
   "pwa": {
     "offlineReady": "应用可以离线使用了",
@@ -148,5 +175,118 @@
   "visitorCapsule": {
     "welcomeBack": "欢迎回来",
     "loading": "加载中..."
+  },
+  "turnstile": {
+    "title": "人机验证",
+    "desc": "当前站点已启用 Cloudflare Turnstile 验证，请完成验证后继续访问监控面板。",
+    "verifying": "正在校验凭证...",
+    "failed": "验证失败或已过期，请重试",
+    "retry": "重新验证"
+  },
+  "privateGate": {
+    "subtitle": "私密监控面板",
+    "title": "该监控站点已开启私密模式",
+    "desc": "访问监控数据前请先前往后台完成管理员登录。",
+    "loginBtn": "前往管理员登录",
+    "refreshBtn": "我已登录，刷新页面",
+    "crossOriginHint": "提示：当前为前后端分离跨域静态部署，私密站点依赖跨站 Cookie（可能被浏览器第三方 Cookie 策略拦截）。如需私密模式，建议使用方式一（CFSM 后台反代同域部署）。"
+  },
+  "wsTimeout": {
+    "title": "实时推送已暂停",
+    "desc": "实时监控连接已持续运行 {{minutes}} 分钟并按站点策略自动断开，以节省服务器额度。是否继续保持实时推送？",
+    "keepStatic": "保持静态展示",
+    "continue": "继续实时连接"
+  },
+  "assetWidget": {
+    "openAria": "打开资产统计",
+    "closeAria": "关闭资产统计",
+    "title": "资产统计",
+    "serverCount": "服务器数量",
+    "totalValue": "总价值",
+    "monthlyCost": "月均支出",
+    "annualCost": "年均支出",
+    "remainingValue": "剩余总价值",
+    "unresolvedHint": "{{count}} 台服务器的币种未配置或无法换算，未计入汇总。",
+    "longTerm": "长期",
+    "longTermHint": "长期机器按原价计入剩余价值",
+    "unset": "未设置",
+    "empty": "没有可显示的资产项目",
+    "rateUpdated": "汇率更新",
+    "defaultRate": "使用默认汇率",
+    "sortWeightAsc": "权重 正序",
+    "sortWeightDesc": "权重 倒序",
+    "sortPriceAsc": "价格 正序",
+    "sortPriceDesc": "价格 倒序",
+    "toggleFree": "切换免费资产",
+    "excludingFree": "当前：已排除免费/白嫖",
+    "includingFree": "当前：包含免费/白嫖",
+    "refreshRate": "刷新汇率",
+    "tradeTitle": "服务器交易",
+    "closeTrade": "关闭交易计算",
+    "serverInfo": "服务器信息",
+    "name": "名称",
+    "monthlyTraffic": "月流量",
+    "originalPrice": "原价",
+    "expireDate": "到期时间",
+    "tradeCalc": "交易计算",
+    "tradeDate": "交易日期",
+    "tradeAmount": "交易金额",
+    "tradeAmountPlaceholder": "请输入交易金额",
+    "remainingVal": "剩余价值",
+    "premiumAmount": "溢价金额",
+    "premiumRate": "溢价率"
+  },
+  "themeSettings": {
+    "title": "主题外观与功能设置",
+    "adminDesc": "当前已登录管理员，保存后将通过 POST /api/theme_options 持久化到服务端。",
+    "guestDesc": "当前为访客模式，可临时预览；持久化保存需先登录管理后台。",
+    "appearance": "外观设置",
+    "siteDesc": "页头副标题描述",
+    "customLogo": "自定义 Logo URL",
+    "desktopBg": "桌面端背景图 URL",
+    "mobileBg": "移动端背景图 URL",
+    "illustration": "概览插图 URL",
+    "customLinks": "顶部自定义链接 (JSON)",
+    "groupOrder": "分组显示顺序 (逗号分隔)",
+    "forceTheme": "主题模式覆盖",
+    "followSystemSite": "跟随系统/站点",
+    "cnyStyle": "人民币符号风格",
+    "layout": "卡片与布局",
+    "forceShowMap": "默认展开全球地图",
+    "forceShowServices": "默认展开三网延迟面板",
+    "forceCardInline": "默认行内紧凑视图",
+    "fixedTopName": "卡片顶部固定节点名称",
+    "showNetTransfer": "卡片底部显示累计上下行流量",
+    "hideIpTag": "隐藏 IPv4/IPv6 标签",
+    "hideVolTag": "隐藏流量配额标签",
+    "svgFlag": "强制使用 SVG 国旗",
+    "disableMan": "隐藏首页概览动画插图",
+    "peakCut": "默认开启网络延迟图表削峰",
+    "trafficBar": "流量进度条与插件",
+    "showTrafficBar": "显示内置流量进度条",
+    "tbPercent": "进度条显示已用百分比",
+    "tbReset": "进度条显示流量重置倒计时",
+    "tbMode": "进度条显示流量计费模式",
+    "showAssetCard": "显示右上角资产统计浮窗",
+    "showVisitorCapsule": "显示底部访客信息胶囊",
+    "assetColor": "资产卡片主色",
+    "capsuleColor": "访客胶囊主色",
+    "assetCurrency": "资产默认币种",
+    "defaultBillingCurrency": "节点默认计费币种",
+    "followBackend": "跟随后端",
+    "advancedOverrides": "高级 JSON 覆盖配置（节点币种 / 重置日）",
+    "currencyOverrides": "单节点计费币种覆盖 (JSON)",
+    "resetDayOverrides": "单节点流量重置日覆盖 (JSON)",
+    "goAdminLogin": "前往后台登录",
+    "saveServer": "保存到服务端",
+    "previewOnly": "仅临时预览",
+    "invalidUrl": "仅支持 http(s) 或以 / 开头的安全地址",
+    "invalidCustomLinks": "顶部自定义链接必须是合法的 JSON 数组",
+    "invalidCustomLinkUrl": "顶部自定义链接包含不安全或无效的 URL",
+    "invalidCurrencyOverrides": "节点币种覆盖必须是合法的 JSON 对象",
+    "invalidResetOverrides": "流量重置日覆盖必须是合法的 JSON 对象",
+    "previewApplied": "已应用本地临时预览（管理员登录后可保存到服务端）",
+    "saved": "主题配置已保存到服务端",
+    "saveFailed": "保存失败"
   }
 }

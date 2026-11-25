@@ -2,6 +2,7 @@ import { getSiteSysConfigByIndex } from "@/api/cfsm-client"
 import ServerFlag from "@/components/ServerFlag"
 import ServerUsageBar from "@/components/ServerUsageBar"
 import TrafficBar from "@/components/TrafficBar"
+import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { formatBytes } from "@/lib/format"
 import { GetOsName, OsIcon } from "@/lib/logo-class"
@@ -19,6 +20,7 @@ export default function ServerCardInline({ now, serverInfo }: { now: number; ser
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { themeOptions } = useCfsm()
+  const { hasActiveBackground } = useBackground()
   const {
     name,
     country_code,
@@ -41,16 +43,18 @@ export default function ServerCardInline({ now, serverInfo }: { now: number; ser
   } = formatNezhaInfo(now, serverInfo)
 
   const cardClick = () => {
-    sessionStorage.setItem("fromMainPage", "true")
+    try {
+      sessionStorage.setItem("fromMainPage", "true")
+      sessionStorage.setItem("scrollPosition", String(window.scrollY || 0))
+    } catch {
+      // ignore storage errors
+    }
     const query = serverInfo.apiIndex ? `?apiIndex=${serverInfo.apiIndex}` : ""
     navigate(`/server/${encodeURIComponent(serverInfo.id)}${query}`)
   }
 
   const showFlag = true
-  const customBackgroundImage =
-    typeof themeOptions.custom_background_image === "string" && themeOptions.custom_background_image.trim()
-      ? themeOptions.custom_background_image.trim()
-      : undefined
+  const customBackgroundImage = hasActiveBackground
   const resolvedShowTf =
     serverInfo.sysConfig?.show_tf ?? getSiteSysConfigByIndex(serverInfo.apiIndex ?? 0)?.show_tf ?? true
   const showTrafficBar =

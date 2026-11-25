@@ -336,7 +336,9 @@ export default function ThemeSettingsModal({ open, onOpenChange }: ThemeSettings
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="system" className="text-xs">跟随系统/站点</SelectItem>
+                    <SelectItem value="system" className="text-xs">
+                      {t("themeSettings.followSystemSite", "跟随系统/站点")}
+                    </SelectItem>
                     <SelectItem value="light" className="text-xs">Light</SelectItem>
                     <SelectItem value="dark" className="text-xs">Dark</SelectItem>
                   </SelectContent>
@@ -382,12 +384,30 @@ export default function ThemeSettingsModal({ open, onOpenChange }: ThemeSettings
             {switchItem("traffic_bar_show_billing_mode", t("themeSettings.tbMode", "进度条显示流量计费模式"), draft.traffic_bar_show_billing_mode !== false)}
             {switchItem("show_asset_card", t("themeSettings.showAssetCard", "显示右上角资产统计浮窗"), draft.show_asset_card === true)}
             {switchItem("show_visitor_capsule", t("themeSettings.showVisitorCapsule", "显示底部访客信息胶囊"), draft.show_visitor_capsule === true)}
-            <div className="grid grid-cols-3 gap-2 pt-2">
+            <div className="grid grid-cols-2 gap-2 pt-2">
               <div className="grid gap-1.5">
                 <Label className="text-xs">{t("themeSettings.assetColor", "资产卡片主色")}</Label>
                 <Select
                   value={String(draft.asset_card_color || "blue")}
                   onValueChange={(v) => updateField("asset_card_color", v as ThemeColorKey)}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {THEME_COLOR_KEYS.map((c) => (
+                      <SelectItem key={c} value={c} className="text-xs capitalize">
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">{t("themeSettings.capsuleColor", "访客胶囊主色")}</Label>
+                <Select
+                  value={String(draft.visitor_capsule_color || "blue")}
+                  onValueChange={(v) => updateField("visitor_capsule_color", v as ThemeColorKey)}
                 >
                   <SelectTrigger className="h-8 text-xs">
                     <SelectValue />
@@ -431,7 +451,7 @@ export default function ThemeSettingsModal({ open, onOpenChange }: ThemeSettings
                   <SelectContent>
                     {DEFAULT_BILLING_CURRENCIES.map((cur) => (
                       <SelectItem key={cur} value={cur} className="text-xs">
-                        {cur}
+                        {cur === "跟随后端" ? t("themeSettings.followBackend", "跟随后端") : cur}
                       </SelectItem>
                     ))}
                   </SelectContent>

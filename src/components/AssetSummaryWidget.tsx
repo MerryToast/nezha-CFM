@@ -1,3 +1,4 @@
+import { useCfsm } from "@/hooks/use-cfsm"
 import { formatBytes } from "@/lib/format"
 import { ASSET_COLORS, resolveThemeColor } from "@/lib/theme-colors"
 import {
@@ -11,8 +12,10 @@ import {
   resolveThemeBillingCurrency,
 } from "@/lib/utils"
 import { NezhaServer } from "@/types/nezha-api"
+import dayjs from "dayjs"
 import { CircleDollarSign, Heart, HelpCircle, RefreshCw, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { useTranslation } from "react-i18next"
 
 type AssetSummaryWidgetProps = {
   now: number
@@ -65,13 +68,18 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   JPY: "¥",
 }
 
-function getInitialCurrency(): string {
-  const win = window as unknown as Record<string, unknown>
-  const configured = typeof win.AssetCardDefaultCurrency === "string" ? normalizeBillingCurrency(win.AssetCardDefaultCurrency) : ""
+function getInitialCurrency(configuredRaw?: unknown): string {
+  const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
+  const raw = configuredRaw ?? win.AssetCardDefaultCurrency
+  const configured = typeof raw === "string" ? normalizeBillingCurrency(raw) : ""
   if (DISPLAY_CURRENCIES.includes(configured as (typeof DISPLAY_CURRENCIES)[number])) {
     return configured
   }
-  return localStorage.getItem("asset_card_currency") || "CNY"
+  try {
+    return localStorage.getItem("asset_card_currency") || "CNY"
+  } catch {
+    return "CNY"
+  }
 }
 
 function formatMoney(value: number | null, currency: string): string {
@@ -180,21 +188,32 @@ function getRemainingSourceValue(billing: BillingData, amount: number, atDate = 
   }
 }
 
-function getSourcePriceText(billing?: BillingData, currency?: string): string {
-  if (!billing?.amount || billing.amount === "0") return "未设置"
-  if (billing.amount === "-1") return "免费"
+function getSourcePriceText(
+  billing: BillingData | undefined,
+  currency: string | undefined,
+  unsetLabel: string,
+  freeLabel: string,
+): string {
+  if (!billing?.amount || billing.amount === "0") return unsetLabel
+  if (billing.amount === "-1") return freeLabel
   const amount = formatBillingAmount(billing.amount, currency || billing.currency)
   return billing.cycle ? `${amount}/${billing.cycle}` : amount
 }
 
-function formatEndDate(endDate?: string): string {
+function formatEndDate(endDate: string | undefined, longTermLabel: string): string {
   if (!endDate) return "-"
-  if (endDate.startsWith("0000-00-00")) return "长期"
-  const endMs = Date.parse(endDate)
-  return Number.isFinite(endMs) ? new Date(endMs).toLocaleDateString() : "-"
+  if (endDate.startsWith("0000-00-00")) return longTermLabel
+  const endDay = dayjs(endDate)
+  return endDay.isValid() ? endDay.format("YYYY-MM-DD") : "-"
 }
 
-function buildAssetItem(now: number, server: NezhaServer, rates: ExchangeRates): AssetItem {
+function buildAssetItem(
+  now: number,
+  server: NezhaServer,
+  rates: ExchangeRates,
+  unsetLabel: string,
+  freeLabel: string,
+): AssetItem {
   const formatted = formatNezhaInfo(now, server)
   const parsed = server.parsed_note ?? parsePublicNote(formatted.public_note)
   const billing = parsed?.billingDataMod
@@ -225,7 +244,7 @@ function buildAssetItem(now: number, server: NezhaServer, rates: ExchangeRates):
     isUsageBased: false,
     isLongTerm: remaining?.isLongTerm || false,
     isFreeTagged: extra.includes("白嫖"),
-    sourcePriceText: getSourcePriceText(billing, sourceCurrency),
+    sourcePriceText: getSourcePriceText(billing, sourceCurrency, unsetLabel, freeLabel),
   }
 }
 
@@ -240,8 +259,9 @@ function sortAssetItems(items: AssetItem[], sortBy: AssetSort) {
 }
 
 function useExchangeRates(refreshKey: number, enabled: boolean) {
+  const { t } = useTranslation()
   const [rates, setRates] = useState<ExchangeRates>(DEFAULT_EXCHANGE_RATES)
-  const [status, setStatus] = useState("使用默认汇率")
+  const [updatedTime, setUpdatedTime] = useState<string | null>(null)
 
   useEffect(() => {
     if (!enabled) return
@@ -266,7 +286,7 @@ function useExchangeRates(refreshKey: number, enabled: boolean) {
             }
             cleanRates.CNY = 1
             setRates(cleanRates)
-            setStatus(`汇率更新: ${new Date().toLocaleTimeString()}`)
+            setUpdatedTime(new Date().toLocaleTimeString())
             return
           }
         } catch {
@@ -275,7 +295,7 @@ function useExchangeRates(refreshKey: number, enabled: boolean) {
       }
       if (!cancelled) {
         setRates(DEFAULT_EXCHANGE_RATES)
-        setStatus("使用默认汇率")
+        setUpdatedTime(null)
       }
     }
 
@@ -286,6 +306,10 @@ function useExchangeRates(refreshKey: number, enabled: boolean) {
       window.clearTimeout(timeout)
     }
   }, [enabled, refreshKey])
+
+  const status = updatedTime
+    ? `${t("assetWidget.rateUpdated", "汇率更新")}: ${updatedTime}`
+    : t("assetWidget.defaultRate", "使用默认汇率")
 
   return { rates, status }
 }
@@ -300,23 +324,57 @@ function FinanceRow({ label, value, accentClass }: { label: string; value: strin
 }
 
 export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetProps) {
+  const { t } = useTranslation()
+  const { themeOptions } = useCfsm()
   const [open, setOpen] = useState(false)
   const [activated, setActivated] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [targetCurrency, setTargetCurrency] = useState(getInitialCurrency)
-  const [sortBy, setSortBy] = useState<AssetSort>((localStorage.getItem("asset_card_sort") as AssetSort) || "weight_asc")
-  const [excludeFree, setExcludeFree] = useState(localStorage.getItem("asset_card_exclude_free") !== "false")
+  const [targetCurrency, setTargetCurrency] = useState(() =>
+    getInitialCurrency(themeOptions?.asset_card_default_currency),
+  )
+  const [sortBy, setSortBy] = useState<AssetSort>(() => {
+    try {
+      return (localStorage.getItem("asset_card_sort") as AssetSort) || "weight_asc"
+    } catch {
+      return "weight_asc"
+    }
+  })
+  const [excludeFree, setExcludeFree] = useState(() => {
+    try {
+      return localStorage.getItem("asset_card_exclude_free") !== "false"
+    } catch {
+      return true
+    }
+  })
   const [tradeItem, setTradeItem] = useState<AssetItem | null>(null)
   const [tradeAmount, setTradeAmount] = useState("")
-  const [tradeDate, setTradeDate] = useState(new Date().toISOString().slice(0, 10))
+  const [tradeDate, setTradeDate] = useState(() => dayjs().format("YYYY-MM-DD"))
   const { rates, status } = useExchangeRates(refreshKey, activated)
 
-  const palette = useMemo(() => {
-    const colorKey = resolveThemeColor((window as unknown as Record<string, unknown>).AssetCardColor)
-    return ASSET_COLORS[colorKey]
-  }, [])
+  useEffect(() => {
+    if (!themeOptions?.asset_card_default_currency) return
+    const normalized = normalizeBillingCurrency(themeOptions.asset_card_default_currency)
+    if (DISPLAY_CURRENCIES.includes(normalized as (typeof DISPLAY_CURRENCIES)[number])) {
+      setTargetCurrency(normalized)
+    }
+  }, [themeOptions?.asset_card_default_currency])
 
-  const items = useMemo(() => servers.map((server) => buildAssetItem(now, server, rates)), [now, rates, servers])
+  const palette = useMemo(() => {
+    const rawColor =
+      themeOptions?.asset_card_color ??
+      (window as unknown as Record<string, unknown>).AssetCardColor
+    return ASSET_COLORS[resolveThemeColor(rawColor)]
+  }, [themeOptions?.asset_card_color])
+
+  const unsetLabel = t("assetWidget.unset", "未设置")
+  const freeLabel = t("billingInfo.free", "免费")
+  const longTermLabel = t("assetWidget.longTerm", "长期")
+  const billingThemeSig = `${themeOptions?.cny_symbol_style ?? ""}|${themeOptions?.default_billing_currency ?? ""}|${JSON.stringify(themeOptions?.server_billing_currency_overrides ?? "")}`
+
+  const items = useMemo(() => {
+    void billingThemeSig
+    return servers.map((server) => buildAssetItem(now, server, rates, unsetLabel, freeLabel))
+  }, [billingThemeSig, freeLabel, now, rates, servers, unsetLabel])
   const visibleItems = useMemo(() => {
     const filtered = excludeFree ? items.filter((item) => !item.isFree && !item.isUsageBased && !item.isFreeTagged) : items
     return sortAssetItems(filtered, sortBy)
@@ -343,7 +401,8 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
 
   const selectedTradeRemaining = useMemo(() => {
     if (!tradeItem?.billing || tradeItem.sourceAmount === null) return tradeItem?.remainingCny ?? null
-    const asOf = new Date(`${tradeDate}T00:00:00`)
+    const parsedDay = dayjs(tradeDate).startOf("day")
+    const asOf = parsedDay.isValid() ? parsedDay.toDate() : new Date()
     const remaining = getRemainingSourceValue(tradeItem.billing, tradeItem.sourceAmount, asOf)
     return amountToCny(remaining.value, tradeItem.sourceCurrency, rates)
   }, [rates, tradeDate, tradeItem])
@@ -358,7 +417,7 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
     <>
       <button
         type="button"
-        aria-label="打开资产统计"
+        aria-label={t("assetWidget.openAria", "打开资产统计")}
         className={cn(
           "fixed right-5 top-[70px] z-[1041] flex size-11 items-center justify-center rounded-full border border-border bg-card/85 shadow-lg backdrop-blur-xl transition max-[576px]:right-4",
           palette.triggerText,
@@ -381,11 +440,11 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className={cn("flex items-center gap-2 text-sm font-bold", palette.panelTitle)}>
             <CircleDollarSign className="size-4" />
-            资产统计
+            {t("assetWidget.title", "资产统计")}
           </h3>
           <button
             type="button"
-            aria-label="关闭资产统计"
+            aria-label={t("assetWidget.closeAria", "关闭资产统计")}
             className={cn("rounded-full p-1 text-muted-foreground transition", palette.hoverPrimary)}
             onClick={() => setOpen(false)}
           >
@@ -394,15 +453,20 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
         </div>
 
         <div className="flex flex-col gap-2 px-4 py-3">
-          <FinanceRow label="服务器数量" value={`${servers.length}`} accentClass={palette.primaryText} />
-          <FinanceRow label="总价值" value={formatMoney(totals.total * targetRate, targetCurrency)} accentClass={palette.primaryText} />
-          <FinanceRow label="月均支出" value={formatMoney(totals.monthly * targetRate, targetCurrency)} accentClass={palette.primaryText} />
-          <FinanceRow label="年均支出" value={formatMoney(totals.monthly * 12 * targetRate, targetCurrency)} accentClass={palette.primaryText} />
-          <FinanceRow label="剩余总价值" value={formatMoney(totals.remaining * targetRate, targetCurrency)} accentClass={palette.primaryText} />
+          <FinanceRow label={t("assetWidget.serverCount", "服务器数量")} value={`${servers.length}`} accentClass={palette.primaryText} />
+          <FinanceRow label={t("assetWidget.totalValue", "总价值")} value={formatMoney(totals.total * targetRate, targetCurrency)} accentClass={palette.primaryText} />
+          <FinanceRow label={t("assetWidget.monthlyCost", "月均支出")} value={formatMoney(totals.monthly * targetRate, targetCurrency)} accentClass={palette.primaryText} />
+          <FinanceRow label={t("assetWidget.annualCost", "年均支出")} value={formatMoney(totals.monthly * 12 * targetRate, targetCurrency)} accentClass={palette.primaryText} />
+          <FinanceRow label={t("assetWidget.remainingValue", "剩余总价值")} value={formatMoney(totals.remaining * targetRate, targetCurrency)} accentClass={palette.primaryText} />
           {totals.unresolved > 0 && (
             <div className="flex items-start gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-300">
               <HelpCircle className="mt-0.5 size-3 shrink-0" />
-              <span>{totals.unresolved} 台服务器的币种未配置或无法换算，未计入汇总。</span>
+              <span>
+                {t("assetWidget.unresolvedHint", {
+                  defaultValue: `${totals.unresolved} 台服务器的币种未配置或无法换算，未计入汇总。`,
+                  count: totals.unresolved,
+                })}
+              </span>
             </div>
           )}
 
@@ -413,11 +477,11 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
               visibleItems.map((item) => {
                 const convertedValue = cnyToCurrency(item.remainingCny ?? item.priceCny, targetCurrency, rates)
                 const title = item.isLongTerm
-                  ? "长期机器按原价计入剩余价值"
+                  ? t("assetWidget.longTermHint", "长期机器按原价计入剩余价值")
                   : item.isExpired
-                    ? "已过期"
+                    ? t("billingInfo.expired", "已过期")
                     : item.remainingDays !== null
-                      ? `剩余 ${item.remainingDays} 天`
+                      ? `${t("billingInfo.remaining", "剩余")} ${item.remainingDays} ${t("billingInfo.days", "天")}`
                       : item.sourcePriceText
 
                 return (
@@ -426,7 +490,7 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                     type="button"
                     className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1.5 text-left text-[13px] transition hover:bg-accent"
                     onClick={() => {
-                      setTradeDate(new Date().toISOString().slice(0, 10))
+                      setTradeDate(dayjs().format("YYYY-MM-DD"))
                       setTradeAmount("")
                       setTradeItem(item)
                     }}
@@ -447,7 +511,7 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                 )
               })
             ) : (
-              <p className="py-4 text-center text-xs text-muted-foreground">没有可显示的资产项目</p>
+              <p className="py-4 text-center text-xs text-muted-foreground">{t("assetWidget.empty", "没有可显示的资产项目")}</p>
             )}
           </div>
 
@@ -487,32 +551,32 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                   localStorage.setItem("asset_card_sort", nextSort)
                 }}
               >
-                <option value="weight_asc">权重 正序</option>
-                <option value="weight_desc">权重 倒序</option>
-                <option value="price_asc">价格 正序</option>
-                <option value="price_desc">价格 倒序</option>
+                <option value="weight_asc">{t("assetWidget.sortWeightAsc", "权重 正序")}</option>
+                <option value="weight_desc">{t("assetWidget.sortWeightDesc", "权重 倒序")}</option>
+                <option value="price_asc">{t("assetWidget.sortPriceAsc", "价格 正序")}</option>
+                <option value="price_desc">{t("assetWidget.sortPriceDesc", "价格 倒序")}</option>
               </select>
             </div>
             <div className="flex gap-1">
               <button
                 type="button"
-                aria-label="切换免费资产"
+                aria-label={t("assetWidget.toggleFree", "切换免费资产")}
                 className={cn("rounded p-1 text-muted-foreground transition", palette.hoverPrimary, excludeFree && palette.primaryText)}
                 onClick={() => {
                   const nextValue = !excludeFree
                   setExcludeFree(nextValue)
                   localStorage.setItem("asset_card_exclude_free", String(nextValue))
                 }}
-                title={excludeFree ? "当前：已排除免费/白嫖" : "当前：包含免费/白嫖"}
+                title={excludeFree ? t("assetWidget.excludingFree", "当前：已排除免费/白嫖") : t("assetWidget.includingFree", "当前：包含免费/白嫖")}
               >
                 <Heart className="size-4" />
               </button>
               <button
                 type="button"
-                aria-label="刷新汇率"
+                aria-label={t("assetWidget.refreshRate", "刷新汇率")}
                 className={cn("rounded p-1 text-muted-foreground transition", palette.hoverPrimary)}
                 onClick={() => setRefreshKey((value) => value + 1)}
-                title="刷新汇率"
+                title={t("assetWidget.refreshRate", "刷新汇率")}
               >
                 <RefreshCw className="size-4" />
               </button>
@@ -533,11 +597,11 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <h3 className={cn("flex items-center gap-2 text-sm font-bold", palette.panelTitle)}>
                 <CircleDollarSign className="size-4" />
-                服务器交易
+                {t("assetWidget.tradeTitle", "服务器交易")}
               </h3>
               <button
                 type="button"
-                aria-label="关闭交易计算"
+                aria-label={t("assetWidget.closeTrade", "关闭交易计算")}
                 className={cn("rounded-full p-1 text-muted-foreground transition", palette.hoverPrimary)}
                 onClick={() => setTradeItem(null)}
               >
@@ -546,10 +610,10 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
             </div>
 
             <div className="max-h-[calc(90vh-52px)] overflow-y-auto p-4">
-              <div className={cn("mb-3 text-sm font-bold", palette.panelTitle)}>服务器信息</div>
+              <div className={cn("mb-3 text-sm font-bold", palette.panelTitle)}>{t("assetWidget.serverInfo", "服务器信息")}</div>
               <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-muted/30 text-[13px]">
                 <div className="border-b border-r border-border p-2">
-                  <span className="text-muted-foreground">名称</span>
+                  <span className="text-muted-foreground">{t("assetWidget.name", "名称")}</span>
                   <p className="font-medium">{tradeItem.name}</p>
                 </div>
                 <div className="border-b border-border p-2">
@@ -557,15 +621,15 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                   <p className="font-medium tabular-nums">{tradeItem.formatted.cpu.toFixed(2)}%</p>
                 </div>
                 <div className="border-b border-r border-border p-2">
-                  <span className="text-muted-foreground">内存</span>
+                  <span className="text-muted-foreground">{t("serverDetail.mem", "内存")}</span>
                   <p className="font-medium tabular-nums">{formatBytes(tradeItem.formatted.mem_total)}</p>
                 </div>
                 <div className="border-b border-border p-2">
-                  <span className="text-muted-foreground">硬盘</span>
+                  <span className="text-muted-foreground">{t("serverDetail.disk", "硬盘")}</span>
                   <p className="font-medium tabular-nums">{formatBytes(tradeItem.formatted.disk_total)}</p>
                 </div>
                 <div className="border-b border-r border-border p-2">
-                  <span className="text-muted-foreground">月流量</span>
+                  <span className="text-muted-foreground">{t("assetWidget.monthlyTraffic", "月流量")}</span>
                   <p className="font-medium tabular-nums">
                     {tradeItem.formatted.traffic_limit > 0
                       ? `${formatBytes(
@@ -579,20 +643,20 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                   </p>
                 </div>
                 <div className="border-b border-border p-2">
-                  <span className="text-muted-foreground">原价</span>
+                  <span className="text-muted-foreground">{t("assetWidget.originalPrice", "原价")}</span>
                   <p className="font-medium">{tradeItem.sourcePriceText}</p>
                 </div>
                 <div className="col-span-2 p-2">
-                  <span className="text-muted-foreground">到期时间</span>
-                  <p className="font-medium">{formatEndDate(tradeItem.billing?.endDate)}</p>
+                  <span className="text-muted-foreground">{t("assetWidget.expireDate", "到期时间")}</span>
+                  <p className="font-medium">{formatEndDate(tradeItem.billing?.endDate, longTermLabel)}</p>
                 </div>
               </div>
 
               <div className="my-4 h-px bg-border" />
-              <div className={cn("mb-3 text-sm font-bold", palette.panelTitle)}>交易计算</div>
+              <div className={cn("mb-3 text-sm font-bold", palette.panelTitle)}>{t("assetWidget.tradeCalc", "交易计算")}</div>
               <div className="grid gap-3">
                 <label className="grid gap-1 text-[13px] font-semibold text-muted-foreground">
-                  交易日期
+                  {t("assetWidget.tradeDate", "交易日期")}
                   <input
                     className={cn("h-9 rounded-md border border-border bg-background px-3 text-foreground outline-none focus:ring-2", palette.focusInput)}
                     type="date"
@@ -601,7 +665,7 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                   />
                 </label>
                 <label className="grid gap-1 text-[13px] font-semibold text-muted-foreground">
-                  交易金额
+                  {t("assetWidget.tradeAmount", "交易金额")}
                   <input
                     className={cn(
                       "h-11 rounded-md border-2 border-border bg-background px-3 text-base font-bold outline-none transition focus:ring-2",
@@ -611,26 +675,26 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                     type="number"
                     min="0"
                     step="0.01"
-                    placeholder="请输入交易金额"
+                    placeholder={t("assetWidget.tradeAmountPlaceholder", "请输入交易金额")}
                     value={tradeAmount}
                     onChange={(event) => setTradeAmount(event.target.value)}
                   />
                 </label>
                 <div className="rounded-lg border border-border bg-muted/30 px-3 py-1 text-[13px]">
                   <div className="flex justify-between border-b border-border py-2">
-                    <span className="text-muted-foreground">剩余价值</span>
+                    <span className="text-muted-foreground">{t("assetWidget.remainingVal", "剩余价值")}</span>
                     <span className={cn("font-semibold tabular-nums", palette.primaryText)}>
                       {formatMoney(tradeRemainingValue, targetCurrency)}
                     </span>
                   </div>
                   <div className="flex justify-between border-b border-border py-2">
-                    <span className="text-muted-foreground">溢价金额</span>
+                    <span className="text-muted-foreground">{t("assetWidget.premiumAmount", "溢价金额")}</span>
                     <span className={cn("font-semibold tabular-nums text-red-600", premiumValue !== null && premiumValue <= 0 && "text-green-600")}>
                       {premiumValue === null ? "-" : formatMoney(premiumValue, targetCurrency)}
                     </span>
                   </div>
                   <div className="flex justify-between py-2">
-                    <span className="text-muted-foreground">溢价率</span>
+                    <span className="text-muted-foreground">{t("assetWidget.premiumRate", "溢价率")}</span>
                     <span className={cn("font-semibold tabular-nums text-red-600", premiumValue !== null && premiumValue <= 0 && "text-green-600")}>
                       {premiumRate === null ? "-" : `${premiumRate > 0 ? "+" : ""}${premiumRate.toFixed(2)}%`}
                     </span>

@@ -7,6 +7,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { calcTrafficUsed, isValidDiskIo } from "@/lib/cfsm-normalizer"
 import { formatBytes } from "@/lib/format"
@@ -30,15 +31,17 @@ export default function ServerDetailOverview({ server, now, loading }: ServerDet
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { themeOptions } = useCfsm()
+  const { hasActiveBackground: customBackgroundImage } = useBackground()
 
   const [hasHistory, setHasHistory] = useState(false)
 
   useEffect(() => {
-    const previousPath = sessionStorage.getItem("fromMainPage")
-    if (previousPath) {
-      setHasHistory(true)
+    try {
+      setHasHistory(sessionStorage.getItem("fromMainPage") === "true")
+    } catch {
+      setHasHistory(false)
     }
-  }, [])
+  }, [server?.uid])
 
   if (loading && !server) {
     return <ServerDetailLoading />
@@ -49,7 +52,14 @@ export default function ServerDetailOverview({ server, now, loading }: ServerDet
   }
 
   const linkClick = () => {
-    if (hasHistory) {
+    let shouldPop = hasHistory
+    try {
+      shouldPop = sessionStorage.getItem("fromMainPage") === "true"
+      sessionStorage.removeItem("fromMainPage")
+    } catch {
+      // ignore storage errors
+    }
+    if (shouldPop && window.history.length > 1) {
       navigate(-1)
     } else {
       navigate("/")
@@ -81,12 +91,6 @@ export default function ServerDetailOverview({ server, now, loading }: ServerDet
     last_active_time_string,
     boot_time_string,
   } = formatNezhaInfo(now, server)
-
-  const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
-  const customBackgroundImage =
-    Boolean(themeOptions?.custom_background_image) ||
-    Boolean(themeOptions?.custom_mobile_background_image) ||
-    (typeof win.CustomBackgroundImage === "string" && win.CustomBackgroundImage !== "")
 
   const resolvedShowTf =
     server.sysConfig?.show_tf ?? getSiteSysConfigByIndex(server.apiIndex ?? 0)?.show_tf ?? true

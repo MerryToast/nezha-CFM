@@ -1,3 +1,4 @@
+import { sanitizeSafeUrl } from "@/lib/security"
 import {
   STORAGE_KEYS,
   clearTurnstileStorage,
@@ -56,6 +57,20 @@ function stripTrailingSlash(value: string): string {
   return String(value || "").replace(/\/+$/, "")
 }
 
+function normalizeSafeApiOrigin(raw: string): string {
+  const trimmed = String(raw || "").trim()
+  if (!trimmed || /[\s;"'<>]/.test(trimmed)) return ""
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return ""
+    }
+    return stripTrailingSlash(parsed.origin)
+  } catch {
+    return ""
+  }
+}
+
 let cachedBases: string[] | null = null
 let hasExplicitMetaBases = false
 
@@ -65,7 +80,7 @@ export function initApiBases(): string[] {
     if (meta) {
       const parsed = meta
         .split(",")
-        .map((s) => stripTrailingSlash(s.trim()))
+        .map((s) => normalizeSafeApiOrigin(s))
         .filter(Boolean)
       if (parsed.length > 0) {
         hasExplicitMetaBases = true
@@ -75,7 +90,7 @@ export function initApiBases(): string[] {
     }
   }
   hasExplicitMetaBases = false
-  const origin = typeof window !== "undefined" ? stripTrailingSlash(window.location.origin) : ""
+  const origin = typeof window !== "undefined" ? normalizeSafeApiOrigin(window.location.origin) : ""
   cachedBases = origin ? [origin] : []
   return cachedBases
 }
@@ -99,19 +114,22 @@ export function hasMultipleApiBases(): boolean {
 export function getAdminEntryUrl(apiIndex = 0): string {
   const bases = getApiBases()
   if (hasConfiguredApiBase() && bases[apiIndex]) {
-    return `${bases[apiIndex]}/admin#/admin`
+    return (
+      sanitizeSafeUrl(`${bases[apiIndex]}/admin#/admin`, { allowRelative: true, allowHash: true }) ||
+      "/admin#/admin"
+    )
   }
   return "/admin#/admin"
 }
 
 export function getWorkerStaticAssetUrl(assetPath: string, apiIndex = 0): string {
-  const clean = String(assetPath || "").replace(/^\/+/, "")
-  if (!clean) return "/"
+  const clean = String(assetPath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+  if (!clean || clean.includes("..")) return "/"
   const bases = getApiBases()
-  if (hasConfiguredApiBase() && bases[apiIndex]) {
-    return `${bases[apiIndex]}/${clean}`
-  }
-  return `/${clean}`
+  const rawUrl = hasConfiguredApiBase() && bases[apiIndex] ? `${bases[apiIndex]}/${clean}` : `/${clean}`
+  return sanitizeSafeUrl(rawUrl, { allowRelative: true, allowHash: false }) || "/"
 }
 
 function resolveOriginScope(baseUrl?: string): { origin: string; isSameOrigin: boolean } {
@@ -254,19 +272,25 @@ async function fetchCFSM<T>(endpoint: string, options: FetchOptions = {}): Promi
 
   const base = stripTrailingSlash(baseUrl ?? getApiBases()[0] ?? "")
   const { isSameOrigin } = resolveOriginScope(base)
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+  const headers: Record<string, string> = {}
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json"
   }
+
+  const targetSite = getSiteConfigByIndex(getApiIndexForBase(base))
+  const isConfigOrWrite = endpoint === "/api/config" || endpoint === "/api/theme_options"
+  const isLongHistory = endpoint.startsWith("/api/history/all") && /hours=(48|96|168)\b/.test(endpoint)
+  const requiresAuthContext =
+    isSameOrigin ||
+    isConfigOrWrite ||
+    isLongHistory ||
+    targetSite?.is_public !== true ||
+    targetSite?.authorization === true
 
   if (includeAuth) {
     const jwt = getJwtToken(base)
-    if (jwt) {
-      const targetSite = getSiteConfigByIndex(getApiIndexForBase(base))
-      const isConfigOrWrite = endpoint === "/api/config" || endpoint === "/api/theme_options"
-      const isLongHistory = endpoint.startsWith("/api/history/all") && /hours=(48|96|168)\b/.test(endpoint)
-      if (isSameOrigin || isConfigOrWrite || isLongHistory || targetSite?.is_public !== true || Boolean(jwt)) {
-        headers["Authorization"] = `Bearer ${jwt}`
-      }
+    if (jwt && requiresAuthContext) {
+      headers["Authorization"] = `Bearer ${jwt}`
     }
   }
 
@@ -284,6 +308,12 @@ async function fetchCFSM<T>(endpoint: string, options: FetchOptions = {}): Promi
     }
   }
 
+  const credentialsMode: RequestCredentials = isSameOrigin
+    ? "same-origin"
+    : requiresAuthContext
+      ? "include"
+      : "omit"
+
   const controller = new AbortController()
   const timer = timeoutMs > 0 ? window.setTimeout(() => controller.abort(), timeoutMs) : null
 
@@ -292,7 +322,7 @@ async function fetchCFSM<T>(endpoint: string, options: FetchOptions = {}): Promi
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
-      credentials: "include",
+      credentials: credentialsMode,
       signal: controller.signal,
     })
 
@@ -440,27 +470,60 @@ export function markSiteTurnstileUnverified(baseUrl: string): CfsmSiteConfig | n
         ...entry,
         config: {
           ...entry.config,
+          turnstile_enabled: true,
           verified: false,
         },
       })
       matched = true
     }
   })
-  if (!matched && siteConfigsByIndex.size > 0) {
-    const first = siteConfigsByIndex.get(0)
-    if (first) {
-      siteConfigsByIndex.set(0, {
-        ...first,
-        config: {
-          ...first.config,
-          verified: false,
-        },
-      })
-    }
+  if (!matched) {
+    return null
   }
-  if (siteConfigsByIndex.size === 0) return null
   cachedSiteConfig = mergeSiteConfigs()
   return cachedSiteConfig
+}
+
+export function markSiteUnauthorized(baseUrl: string): CfsmSiteConfig | null {
+  const normalized = stripTrailingSlash(baseUrl)
+  let matched = false
+  siteConfigsByIndex.forEach((entry, idx) => {
+    if (stripTrailingSlash(entry.baseUrl) === normalized || (!normalized && idx === 0)) {
+      siteConfigsByIndex.set(idx, {
+        ...entry,
+        config: {
+          ...entry.config,
+          is_public: false,
+          authorization: false,
+        },
+      })
+      matched = true
+    }
+  })
+  if (!matched) {
+    return null
+  }
+  cachedSiteConfig = mergeSiteConfigs()
+  return cachedSiteConfig
+}
+
+export async function refreshSiteConfigByIndex(apiIndex: number): Promise<CfsmSiteConfig | null> {
+  if (USE_MOCK) return cachedSiteConfig
+  const bases = getApiBases()
+  const baseUrl = bases[apiIndex] ?? (apiIndex === 0 ? "" : undefined)
+  if (baseUrl === undefined) return null
+  try {
+    const cfg = await fetchConfigForBase(baseUrl)
+    siteConfigsByIndex.set(apiIndex, {
+      apiIndex,
+      baseUrl,
+      config: cfg,
+    })
+    cachedSiteConfig = mergeSiteConfigs()
+    return cachedSiteConfig
+  } catch {
+    return null
+  }
 }
 
 async function fetchConfigForBase(baseUrl: string): Promise<CfsmSiteConfig> {

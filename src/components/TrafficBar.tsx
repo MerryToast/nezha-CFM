@@ -1,3 +1,4 @@
+import { useCfsm } from "@/hooks/use-cfsm"
 import { normalizeTrafficCalcType } from "@/lib/cfsm-normalizer"
 import { formatBytes } from "@/lib/format"
 import { useEffect, useRef, useState } from "react"
@@ -53,14 +54,15 @@ function getColor(percent: number): string {
 
 export default function TrafficBar({ used, limit, resetDay, limitType }: TrafficBarProps) {
   const { t } = useTranslation()
+  const { themeOptions } = useCfsm()
   const [infoIndex, setInfoIndex] = useState(0)
   const [fading, setFading] = useState(false)
   const fadeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const win = window as unknown as Record<string, unknown>
-  const showPercent = win.TrafficBarShowPercent !== false
-  const showResetDay = win.TrafficBarShowResetDay !== false
-  const showBillingMode = win.TrafficBarShowBillingMode !== false
+  const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
+  const showPercent = (themeOptions?.traffic_bar_show_percent ?? win.TrafficBarShowPercent) !== false
+  const showResetDay = (themeOptions?.traffic_bar_show_reset_day ?? win.TrafficBarShowResetDay) !== false
+  const showBillingMode = (themeOptions?.traffic_bar_show_billing_mode ?? win.TrafficBarShowBillingMode) !== false
 
   const safeUsed = Number.isFinite(used) && used > 0 ? used : 0
   const percent = limit > 0 ? Math.max(0, Math.min(100, (safeUsed / limit) * 100)) : 0

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"
+import React from "react"
 import { HashRouter as Router, Route, Routes } from "react-router-dom"
 
 import { DashCommand } from "./components/DashCommand"
@@ -28,14 +28,7 @@ const MainApp: React.FC = () => {
     retryConfig,
     themeOptions,
   } = useCfsm()
-  const { backgroundImage } = useBackground()
-  const [hasBodyBackground, setHasBodyBackground] = useState(false)
-
-  useEffect(() => {
-    if (typeof document === "undefined" || typeof window === "undefined") return
-    const bg = window.getComputedStyle(document.body).backgroundImage
-    setHasBodyBackground(Boolean(bg && bg !== "none"))
-  }, [config])
+  const { backgroundImage, mobileBackgroundImage, hasActiveBackground } = useBackground()
 
   if (configError && !config) {
     return (
@@ -69,22 +62,9 @@ const MainApp: React.FC = () => {
     )
   }
 
-  const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
-  const customBackgroundImage =
-    (typeof themeOptions?.custom_background_image === "string" && themeOptions.custom_background_image) ||
-    backgroundImage ||
-    (typeof win.CustomBackgroundImage === "string" && win.CustomBackgroundImage) ||
-    undefined
-
-  const customMobileBackgroundImage =
-    (typeof themeOptions?.custom_mobile_background_image === "string" &&
-      themeOptions.custom_mobile_background_image) ||
-    (typeof win.CustomMobileBackgroundImage === "string" && win.CustomMobileBackgroundImage) ||
-    undefined
-
-  const safeDesktopBgCss = toSafeCssUrlValue(customBackgroundImage)
-  const safeMobileBgCss = toSafeCssUrlValue(customMobileBackgroundImage)
-  const hasAnyBackground = Boolean(safeDesktopBgCss || safeMobileBgCss || hasBodyBackground)
+  const safeDesktopBgCss = toSafeCssUrlValue(backgroundImage)
+  const safeMobileBgCss = toSafeCssUrlValue(mobileBackgroundImage)
+  const hasAnyBackground = Boolean(safeDesktopBgCss || safeMobileBgCss || hasActiveBackground)
 
   return (
     <ErrorBoundary>

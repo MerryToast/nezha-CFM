@@ -1,3 +1,4 @@
+import { useBackground } from "@/hooks/use-background"
 import { cn } from "@/lib/utils"
 import { m } from "framer-motion"
 import { useEffect, useRef } from "react"
@@ -11,7 +12,7 @@ export default function GroupSwitch({
   currentTab: string
   setCurrentTab: (tab: string) => void
 }) {
-  const customBackgroundImage = (window.CustomBackgroundImage as string) !== "" ? window.CustomBackgroundImage : undefined
+  const { hasActiveBackground: customBackgroundImage } = useBackground()
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const tagRefs = useRef<Map<string, HTMLDivElement>>(new Map())

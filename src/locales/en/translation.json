@@ -7,6 +7,10 @@
   "offline": "Offline",
   "whereTheTimeIs": "Where the time is",
   "refreshing": "Refreshing",
+  "loading": "Loading history...",
+  "cancel": "Cancel",
+  "saving": "Saving...",
+  "toggleBackground": "Toggle background",
   "info": {
     "websocketConnecting": "WebSocket connecting",
     "websocketConnected": "WebSocket connected",
@@ -49,7 +53,10 @@
     "delay": "Delay",
     "daysAgo": "days ago",
     "today": "Today",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "disabledInBackend": "Carrier latency details are disabled in CFSM admin settings",
+    "threeNetWindow": "Carrier Latency & Packet Loss",
+    "allLines": "All Lines"
   },
   "serverDetail": {
     "status": "Status",
@@ -69,7 +76,11 @@
     "download": "Download",
     "lastActive": "Last active time",
     "temperature": "Temperature",
-    "bootTime": "Boot time"
+    "bootTime": "Boot time",
+    "notFound": "Server node not found or access denied",
+    "loginHistoryPrompt": "Log in to view extended history",
+    "monthlyTraffic": "Monthly Traffic (↑ / ↓)",
+    "diskIo": "Disk I/O"
   },
   "serverDetailChart": {
     "process": "Process",
@@ -77,7 +88,11 @@
     "mem": "Mem",
     "swap": "Swap",
     "upload": "Upload",
-    "download": "Download"
+    "download": "Download",
+    "network": "Network",
+    "connect": "Connections",
+    "load": "Load Average",
+    "diskIo": "Disk I/O"
   },
   "footer": {
     "themeBy": "Theme by "
@@ -98,18 +113,30 @@
   },
   "error": {
     "pageNotFound": "Page not found",
-    "backToHome": "Back to home"
+    "backToHome": "Back to home",
+    "somethingWentWrong": "Something went wrong"
   },
   "tabSwitch": {
     "Detail": "Detail",
     "Network": "Network"
   },
   "monitor": {
-    "noData": "No server monitor data, please add a service monitor first",
+    "noData": "No latency probes configured for this server",
     "avgDelay": "Latency",
     "monitorCount": "Services",
     "packetLoss": "Packet Loss",
-    "clearSelections": "Clear"
+    "clearSelections": "Clear",
+    "ct": "China Telecom",
+    "cu": "China Unicom",
+    "cm": "China Mobile",
+    "bd": "BGP / CBN",
+    "node1": "Node 1",
+    "node2": "Node 2",
+    "node3": "Node 3",
+    "node4": "Node 4",
+    "timeout": "Timeout",
+    "avgLoss": "avg loss",
+    "lossShort": "loss"
   },
   "pwa": {
     "offlineReady": "App ready to work offline",
@@ -147,5 +174,118 @@
   "visitorCapsule": {
     "welcomeBack": "Welcome back",
     "loading": "Loading..."
+  },
+  "turnstile": {
+    "title": "Human Verification",
+    "desc": "Cloudflare Turnstile verification is enabled on this site. Complete verification to view the dashboard.",
+    "verifying": "Verifying credential...",
+    "failed": "Verification failed or expired, please retry",
+    "retry": "Verify again"
+  },
+  "privateGate": {
+    "subtitle": "Private Monitor",
+    "title": "Private Mode Enabled",
+    "desc": "Please sign in via the admin console before viewing server metrics.",
+    "loginBtn": "Go to Admin Login",
+    "refreshBtn": "I've signed in, refresh page",
+    "crossOriginHint": "Note: Cross-origin static deployments rely on third-party cookies for private mode. Same-origin CFSM Worker proxy deployment is recommended."
+  },
+  "wsTimeout": {
+    "title": "Live Stream Paused",
+    "desc": "The live WebSocket connection ran for {{minutes}} minutes and paused automatically per site policy to save quota. Continue live updates?",
+    "keepStatic": "Keep Static View",
+    "continue": "Continue Live Stream"
+  },
+  "assetWidget": {
+    "openAria": "Open Asset Summary",
+    "closeAria": "Close Asset Summary",
+    "title": "Asset Summary",
+    "serverCount": "Servers",
+    "totalValue": "Total Value",
+    "monthlyCost": "Monthly Avg",
+    "annualCost": "Annual Avg",
+    "remainingValue": "Remaining Value",
+    "unresolvedHint": "{{count}} server(s) lack a valid currency and were excluded.",
+    "longTerm": "Long-term",
+    "longTermHint": "Long-term servers count full price as remaining value",
+    "unset": "Unset",
+    "empty": "No billable assets to display",
+    "rateUpdated": "Rates updated",
+    "defaultRate": "Using fallback rates",
+    "sortWeightAsc": "Order Asc",
+    "sortWeightDesc": "Order Desc",
+    "sortPriceAsc": "Price Asc",
+    "sortPriceDesc": "Price Desc",
+    "toggleFree": "Toggle free servers",
+    "excludingFree": "Currently excluding free servers",
+    "includingFree": "Currently including free servers",
+    "refreshRate": "Refresh exchange rates",
+    "tradeTitle": "Trade Calculator",
+    "closeTrade": "Close calculator",
+    "serverInfo": "Server Info",
+    "name": "Name",
+    "monthlyTraffic": "Monthly Traffic",
+    "originalPrice": "Plan Price",
+    "expireDate": "Expiry Date",
+    "tradeCalc": "Valuation",
+    "tradeDate": "Trade Date",
+    "tradeAmount": "Trade Price",
+    "tradeAmountPlaceholder": "Enter trade price",
+    "remainingVal": "Remaining Value",
+    "premiumAmount": "Premium",
+    "premiumRate": "Premium %"
+  },
+  "themeSettings": {
+    "title": "Theme & Feature Settings",
+    "adminDesc": "Signed in as admin. Saving persists settings via POST /api/theme_options.",
+    "guestDesc": "Guest mode: changes apply as a local preview. Sign in to save to server.",
+    "appearance": "Appearance",
+    "siteDesc": "Header Subtitle",
+    "customLogo": "Custom Logo URL",
+    "desktopBg": "Desktop Background URL",
+    "mobileBg": "Mobile Background URL",
+    "illustration": "Overview Illustration URL",
+    "customLinks": "Header Custom Links (JSON)",
+    "groupOrder": "Group Display Order (comma-separated)",
+    "forceTheme": "Theme Override",
+    "followSystemSite": "Follow System / Site",
+    "cnyStyle": "CNY Symbol Style",
+    "layout": "Cards & Layout",
+    "forceShowMap": "Expand World Map by default",
+    "forceShowServices": "Expand Carrier Latency panel by default",
+    "forceCardInline": "Use inline compact view by default",
+    "fixedTopName": "Pin server name at top of card",
+    "showNetTransfer": "Show cumulative traffic badges on cards",
+    "hideIpTag": "Hide IPv4/IPv6 badges",
+    "hideVolTag": "Hide traffic quota badge",
+    "svgFlag": "Force SVG country flags",
+    "disableMan": "Hide overview illustration",
+    "peakCut": "Enable latency chart Peak Cut by default",
+    "trafficBar": "Traffic Bar & Widgets",
+    "showTrafficBar": "Show monthly traffic progress bar",
+    "tbPercent": "Show used percentage on traffic bar",
+    "tbReset": "Show reset countdown on traffic bar",
+    "tbMode": "Show billing mode on traffic bar",
+    "showAssetCard": "Show floating Asset Summary widget",
+    "showVisitorCapsule": "Show bottom Visitor Info capsule",
+    "assetColor": "Asset Widget Color",
+    "capsuleColor": "Visitor Capsule Color",
+    "assetCurrency": "Asset Default Currency",
+    "defaultBillingCurrency": "Node Billing Currency",
+    "followBackend": "Follow Backend",
+    "advancedOverrides": "Advanced JSON Overrides (Currency / Reset Day)",
+    "currencyOverrides": "Per-Node Billing Currency Overrides (JSON)",
+    "resetDayOverrides": "Per-Node Traffic Reset Day Overrides (JSON)",
+    "goAdminLogin": "Admin Login",
+    "saveServer": "Save to Server",
+    "previewOnly": "Preview Locally",
+    "invalidUrl": "Only http(s) or safe root-relative / URLs are allowed",
+    "invalidCustomLinks": "Custom links must be a valid JSON array",
+    "invalidCustomLinkUrl": "Custom links contain an unsafe or invalid URL",
+    "invalidCurrencyOverrides": "Currency overrides must be a valid JSON object",
+    "invalidResetOverrides": "Reset day overrides must be a valid JSON object",
+    "previewApplied": "Local preview applied (sign in as admin to persist)",
+    "saved": "Theme settings saved to server",
+    "saveFailed": "Failed to save theme settings"
   }
 }

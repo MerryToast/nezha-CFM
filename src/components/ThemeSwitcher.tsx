@@ -1,6 +1,7 @@
 import { Theme } from "@/components/ThemeProvider"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { useBackground } from "@/hooks/use-background"
 import { cn } from "@/lib/utils"
 import { CheckCircleIcon } from "@heroicons/react/20/solid"
 import { Moon, Sun } from "lucide-react"
@@ -11,8 +12,7 @@ import { useTheme } from "../hooks/use-theme"
 export function ModeToggle() {
   const { t } = useTranslation()
   const { setTheme, theme } = useTheme()
-
-  const customBackgroundImage = (window.CustomBackgroundImage as string) !== "" ? window.CustomBackgroundImage : undefined
+  const { hasActiveBackground: customBackgroundImage } = useBackground()
 
   const handleSelect = (e: Event, newTheme: Theme) => {
     e.preventDefault()

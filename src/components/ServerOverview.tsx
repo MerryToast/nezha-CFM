@@ -1,5 +1,6 @@
 import animatedManDefault from "@/assets/animated-man.webp"
 import { Card, CardContent } from "@/components/ui/card"
+import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { useStatus } from "@/hooks/use-status"
 import { formatBytes } from "@/lib/format"
@@ -22,14 +23,12 @@ export default function ServerOverview({ online, offline, total, up, down, upSpe
   const { t } = useTranslation()
   const { status, setStatus } = useStatus()
   const { themeOptions } = useCfsm()
+  const { hasActiveBackground } = useBackground()
 
   const disableAnimatedMan = themeOptions.disable_animated_man !== false
   const customIllustration =
     sanitizeSafeUrl(themeOptions.custom_illustration, { allowHash: false }) || animatedManDefault
-  const customBackgroundImage =
-    typeof themeOptions.custom_background_image === "string" && themeOptions.custom_background_image.trim()
-      ? themeOptions.custom_background_image.trim()
-      : undefined
+  const customBackgroundImage = hasActiveBackground
 
   return (
     <section className="grid grid-cols-2 gap-4 lg:grid-cols-4 server-overview">

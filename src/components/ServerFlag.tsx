@@ -1,4 +1,5 @@
 import { getWorkerStaticAssetUrl } from "@/api/cfsm-client"
+import { useCfsm } from "@/hooks/use-cfsm"
 import { cn } from "@/lib/utils"
 import getUnicodeFlagIcon from "country-flag-icons/unicode"
 import { useEffect, useState } from "react"
@@ -44,9 +45,11 @@ export default function ServerFlag({
   apiIndex?: number
   className?: string
 }) {
+  const { themeOptions } = useCfsm()
   const [imgFailed, setImgFailed] = useState(false)
 
-  const forceUseSvgFlag = (window as unknown as Record<string, unknown>).ForceUseSvgFlag === true
+  const win = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {}
+  const forceUseSvgFlag = themeOptions?.force_use_svg_flag === true || win.ForceUseSvgFlag === true
   const rawCode = String(country_code || "").trim()
   const code = rawCode.toLowerCase()
   const isIsoAlpha2 = /^[a-z]{2}$/.test(code) && code !== "xx" && code !== "un"

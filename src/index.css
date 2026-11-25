@@ -232,3 +232,8 @@
 .scrollbar-hidden::-webkit-scrollbar {
   display: none; /* Chrome, Safari 和 Opera */
 }
+
+html.cfsm-hide-bg body,
+html.cfsm-hide-bg body::after {
+  background-image: none !important;
+}

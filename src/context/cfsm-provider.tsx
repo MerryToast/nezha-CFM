@@ -6,6 +6,8 @@ import {
   getApiIndexForBase,
   getSiteConfigByIndex,
   markSiteTurnstileUnverified,
+  markSiteUnauthorized,
+  refreshSiteConfigByIndex,
   saveThemeOptions as postThemeOptions,
   subscribeAuthEvents,
   verifyTurnstileConfig,
@@ -217,14 +219,29 @@ export const CfsmProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const idx = getApiIndexForBase(ev.baseUrl)
       if (ev.type === "unauthorized") {
         pendingSyncApiIndicesRef.current.add(idx)
-        setPrivateRequired(true)
+        const updated = markSiteUnauthorized(ev.baseUrl)
+        if (updated) {
+          applyConfigEffects(updated)
+        } else {
+          setConfig((prev) =>
+            prev ? { ...prev, has_unauthorized_private: true, unauthorized_api_index: idx } : prev,
+          )
+          setPrivateRequired(true)
+        }
       } else if (ev.type === "turnstile_failed") {
         pendingSyncApiIndicesRef.current.add(idx)
         const updated = markSiteTurnstileUnverified(ev.baseUrl)
         if (updated) {
           applyConfigEffects(updated)
         } else {
-          setTurnstileRequired(true)
+          void refreshSiteConfigByIndex(idx).then((refreshed) => {
+            if (refreshed) {
+              const marked = markSiteTurnstileUnverified(ev.baseUrl) ?? refreshed
+              applyConfigEffects(marked)
+            } else {
+              setTurnstileRequired(true)
+            }
+          })
         }
       }
     })
