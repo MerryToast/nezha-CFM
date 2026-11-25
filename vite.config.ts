@@ -25,12 +25,25 @@ function loadEnvVars(): Record<string, string> {
       merged[key] = value
     }
   }
-  for (const key of ["API_BASE", "CSP_API", "CSP_STATIC", "TITLE", "BACKGROUND_IMAGE", "BACKGROUND_IMAGE_MOBILE"]) {
+  for (const key of [
+    "API_BASE",
+    "CSP_API",
+    "CSP_IMG",
+    "CSP_STATIC",
+    "TITLE",
+    "BACKGROUND_IMAGE",
+    "BACKGROUND_IMAGE_MOBILE",
+  ]) {
     if (process.env[key]) {
       merged[key] = process.env[key] as string
     }
   }
   return merged
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase()
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "[::1]" || normalized === "::1"
 }
 
 function parseOrigins(raw: string): string[] {
@@ -43,7 +56,7 @@ function parseOrigins(raw: string): string[] {
           if (!s || /[\s;"']/.test(s)) return false
           try {
             const u = new URL(s)
-            return u.protocol === "https:" || u.protocol === "http:"
+            return u.protocol === "https:" || (u.protocol === "http:" && isLoopbackHost(u.hostname))
           } catch {
             return false
           }
@@ -51,6 +64,20 @@ function parseOrigins(raw: string): string[] {
         .map((s) => new URL(s).origin),
     ),
   )
+}
+
+function extractHttpOriginIfExternal(rawUrl: string): string[] {
+  const trimmed = String(rawUrl || "").trim()
+  if (!trimmed || trimmed.startsWith("/") || trimmed.startsWith("./")) return []
+  try {
+    const u = new URL(trimmed)
+    if (u.protocol === "https:" || (u.protocol === "http:" && isLoopbackHost(u.hostname))) {
+      return [u.origin]
+    }
+  } catch {
+    // ignore invalid URL
+  }
+  return []
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -142,15 +169,34 @@ function collectInlineScriptHashes(html: string): { html: string; hashes: string
   return { html: normalizedHtml, hashes }
 }
 
+function insertAfterCharsetOrHeadStart(html: string, tag: string): string {
+  if (/<meta\b[^>]*\bcharset\s*=[^>]*>/i.test(html)) {
+    return html.replace(/(<meta\b[^>]*\bcharset\s*=[^>]*>)/i, `$1\n    ${tag}`)
+  }
+  if (/<head\b[^>]*>/i.test(html)) {
+    return html.replace(/(<head\b[^>]*>)/i, `$1\n    ${tag}`)
+  }
+  return `${tag}\n${html}`
+}
+
 function buildStaticCspMetaContent(
   apiDomains: string[],
   cspApiDomains: string[],
+  cspImgDomains: string[],
   cspStaticDomains: string[],
   inlineScriptHashes: string[],
 ): string {
   const unique = (arr: string[]) => Array.from(new Set(arr.filter(Boolean))).join(" ")
   const connectApi = buildApiDomainsWithWs([...apiDomains, ...cspApiDomains])
-  const imgSrc = ["'self'", TURNSTILE_DOMAIN, RAW_GITHUB_DOMAIN, ...cspStaticDomains, ...apiDomains, "data:"]
+  const imgSrc = [
+    "'self'",
+    TURNSTILE_DOMAIN,
+    RAW_GITHUB_DOMAIN,
+    ...cspImgDomains,
+    ...cspStaticDomains,
+    ...apiDomains,
+    "data:",
+  ]
   return [
     "default-src 'self'",
     `script-src ${unique(["'self'", ...inlineScriptHashes, TURNSTILE_DOMAIN, INSIGHTS_DOMAIN, ...cspStaticDomains])}`,
@@ -174,6 +220,15 @@ function cfsmStaticEnvPlugin(isStaticBuild: boolean): Plugin {
   const title = isStaticBuild ? (env.TITLE || "").trim() : ""
   const bg = isStaticBuild ? (env.BACKGROUND_IMAGE || "").trim() : ""
   const mobileBg = isStaticBuild ? (env.BACKGROUND_IMAGE_MOBILE || "").trim() : ""
+  const cspImgDomains = isStaticBuild
+    ? Array.from(
+        new Set([
+          ...parseOrigins(env.CSP_IMG || ""),
+          ...extractHttpOriginIfExternal(bg),
+          ...extractHttpOriginIfExternal(mobileBg),
+        ]),
+      )
+    : []
 
   return {
     name: "cfsm-static-env-inject",
@@ -195,14 +250,20 @@ function cfsmStaticEnvPlugin(isStaticBuild: boolean): Plugin {
           if (/<meta\b(?=[^>]*\bname=["']apiBase["'])[^>]*>/i.test(out)) {
             out = out.replace(/<meta\b(?=[^>]*\bname=["']apiBase["'])[^>]*>/i, () => meta)
           } else {
-            out = out.replace(/<\/head>/i, () => `${meta}\n</head>`)
+            out = insertAfterCharsetOrHeadStart(out, meta)
           }
         }
         const hashed = collectInlineScriptHashes(out)
         out = hashed.html
-        const cspContent = buildStaticCspMetaContent(apiBases, cspApiDomains, cspStaticDomains, hashed.hashes)
+        const cspContent = buildStaticCspMetaContent(
+          apiBases,
+          cspApiDomains,
+          cspImgDomains,
+          cspStaticDomains,
+          hashed.hashes,
+        )
         const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttr(cspContent)}">`
-        out = out.replace(/<\/head>/i, () => `${cspMeta}\n</head>`)
+        out = insertAfterCharsetOrHeadStart(out, cspMeta)
         if (bg || mobileBg) {
           const rules: string[] = []
           let mobileUrl = ""

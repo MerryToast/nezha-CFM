@@ -11,6 +11,7 @@ import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { calcTrafficUsed, isValidDiskIo } from "@/lib/cfsm-normalizer"
 import { formatBytes } from "@/lib/format"
+import { safeStorageGet, safeStorageRemove } from "@/lib/safe-storage"
 import { cn, formatNezhaInfo } from "@/lib/utils"
 import { NezhaServer } from "@/types/nezha-api"
 import countries from "i18n-iso-countries"
@@ -36,11 +37,7 @@ export default function ServerDetailOverview({ server, now, loading }: ServerDet
   const [hasHistory, setHasHistory] = useState(false)
 
   useEffect(() => {
-    try {
-      setHasHistory(sessionStorage.getItem("fromMainPage") === "true")
-    } catch {
-      setHasHistory(false)
-    }
+    setHasHistory(safeStorageGet("fromMainPage", "session") === "true")
   }, [server?.uid])
 
   if (loading && !server) {
@@ -52,13 +49,9 @@ export default function ServerDetailOverview({ server, now, loading }: ServerDet
   }
 
   const linkClick = () => {
-    let shouldPop = hasHistory
-    try {
-      shouldPop = sessionStorage.getItem("fromMainPage") === "true"
-      sessionStorage.removeItem("fromMainPage")
-    } catch {
-      // ignore storage errors
-    }
+    const storedFromMain = safeStorageGet("fromMainPage", "session") === "true"
+    const shouldPop = storedFromMain || hasHistory
+    safeStorageRemove("fromMainPage", "session")
     if (shouldPop && window.history.length > 1) {
       navigate(-1)
     } else {

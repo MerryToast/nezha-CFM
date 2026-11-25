@@ -4,10 +4,12 @@ import {
   fetchServerDetail,
   fetchServerHistory,
   getSiteConfigByIndex,
+  isValidApiIndex,
 } from "@/api/cfsm-client"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { LiveSampleEvent, LiveSocketController, createCfsmLiveSocket } from "@/hooks/useCFSMWebSocket"
 import {
+  buildLiveHistoryRowFromSample,
   cfsmServerToNezhaServer,
   isCfsmServerOnline,
   mergeBatchSampleIntoServer,
@@ -29,12 +31,32 @@ export const DETAIL_TIME_OPTIONS = [
   { hours: 168, label: "7d" },
 ] as const
 
-const MAX_LIVE_HISTORY_POINTS = 500
+const MAX_LIVE_HISTORY_POINTS = 600
+
+function mergeHistoryRows(prev: CfsmHistoryRow[], incoming: CfsmHistoryRow[], cutoffMs: number): CfsmHistoryRow[] {
+  const byTs = new Map<number, CfsmHistoryRow>()
+  for (const row of prev) {
+    const ts = normalizeTimestampMs(row.timestamp ?? row.last_updated ?? row.last_time, 0)
+    if (ts >= cutoffMs) {
+      byTs.set(ts, { ...row, timestamp: ts })
+    }
+  }
+  for (const row of incoming) {
+    const ts = normalizeTimestampMs(row.timestamp ?? row.last_updated ?? row.last_time, 0)
+    if (ts < cutoffMs) continue
+    const existing = byTs.get(ts)
+    byTs.set(ts, existing ? { ...existing, ...row, timestamp: ts } : { ...row, timestamp: ts })
+  }
+  return Array.from(byTs.values())
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .slice(-MAX_LIVE_HISTORY_POINTS)
+}
 
 export function useServerDetailData(serverId: string, apiIndex = 0) {
   const { config, turnstileRequired, privateRequired, themeOptions } = useCfsm()
 
   const configReady = Boolean(config)
+  const indexValid = isValidApiIndex(apiIndex)
   const configRef = useRef(config)
   configRef.current = config
 
@@ -71,15 +93,16 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
   const wsTimedOutRef = useRef(wsTimedOut)
   wsTimedOutRef.current = wsTimedOut
   const dirtyRef = useRef(false)
+  const frozenAtRef = useRef<number | null>(null)
   const pendingHistoryRowsRef = useRef<CfsmHistoryRow[]>([])
 
   const siteTimeoutMinutes =
-    getSiteConfigByIndex(apiIndex)?.frontend_ws_timeout_minutes ??
+    (indexValid ? getSiteConfigByIndex(apiIndex)?.frontend_ws_timeout_minutes : undefined) ??
     config?.frontend_ws_timeout_minutes ??
     0
 
   const syncNormalizedServer = useCallback((srv: CfsmServer) => {
-    const ts = Date.now()
+    const ts = frozenAtRef.current ?? Date.now()
     const normalized = cfsmServerToNezhaServer(srv, ts, srv.sysConfig, themeOptionsRef.current)
     rawServerRef.current = srv
     renderedOnlineRef.current = normalized.online
@@ -96,7 +119,7 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
   }, [syncNormalizedServer, themeOptions])
 
   const loadDetailOnce = useCallback(async () => {
-    if (!serverId || !configReady || turnstileRequired || privateRequired) return
+    if (!serverId || !configReady || !indexValid || turnstileRequired || privateRequired) return
     const reqId = ++detailReqSeqRef.current
     const reqKey = `${apiIndex}:${serverId}`
     if (!rawServerRef.current) setLoading(true)
@@ -115,6 +138,7 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
             if (!data) continue
             const sampleTs = normalizeTimestampMs(sample.ts ?? sample.timestamp, reportTs)
             merged = mergeBatchSampleIntoServer(merged, data, sampleTs, reportTs)
+            pendingHistoryRowsRef.current.push(buildLiveHistoryRowFromSample(data, sampleTs))
           }
         }
       }
@@ -128,11 +152,11 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
         setLoading(false)
       }
     }
-  }, [apiIndex, configReady, privateRequired, serverId, syncNormalizedServer, turnstileRequired])
+  }, [apiIndex, configReady, indexValid, privateRequired, serverId, syncNormalizedServer, turnstileRequired])
 
   const loadHistory = useCallback(
     async (targetHours: number, force = false) => {
-      if (!serverId || !configReady || turnstileRequired || privateRequired) return
+      if (!serverId || !configReady || !indexValid || turnstileRequired || privateRequired) return
       const validHours = ALLOWED_HISTORY_HOURS.includes(targetHours as (typeof ALLOWED_HISTORY_HOURS)[number])
         ? targetHours
         : 0.167
@@ -147,7 +171,9 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
         if (reqId !== historyReqSeqRef.current || activeTargetRef.current !== reqKey) return
         const sorted = [...rows].sort((a, b) => normalizeTimestampMs(a.timestamp, 0) - normalizeTimestampMs(b.timestamp, 0))
         lastLoadedHoursRef.current = validHours
-        setHistory(sorted)
+        const queued = pendingHistoryRowsRef.current.splice(0)
+        const cutoff = Date.now() - validHours * 3600 * 1000
+        setHistory(queued.length > 0 ? mergeHistoryRows(sorted, queued, cutoff) : sorted)
       } catch (err) {
         if (reqId !== historyReqSeqRef.current || activeTargetRef.current !== reqKey) return
         if (err instanceof CfsmApiError && err.status === 401) {
@@ -166,7 +192,7 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
         }
       }
     },
-    [apiIndex, configReady, privateRequired, serverId, turnstileRequired],
+    [apiIndex, configReady, indexValid, privateRequired, serverId, turnstileRequired],
   )
 
   const changeHours = useCallback(
@@ -188,7 +214,7 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
   }, [])
 
   const startSocket = useCallback(() => {
-    if (!serverId || !configReady || turnstileRequired || privateRequired) return
+    if (!serverId || !configReady || !indexValid || turnstileRequired || privateRequired) return
     if (closedByUserRef.current || wsTimedOutRef.current) return
     if (typeof document !== "undefined" && document.hidden) {
       stopSocket()
@@ -208,33 +234,32 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
         let updated = rawServerRef.current
         for (const s of samples) {
           updated = mergeBatchSampleIntoServer(updated, s.data, s.ts, s.reportTs)
-          if (Math.abs(hoursRef.current - 0.167) < 0.001) {
-            pendingHistoryRowsRef.current.push({
-              ...updated,
-              timestamp: s.ts,
-            })
-          }
+          pendingHistoryRowsRef.current.push(buildLiveHistoryRowFromSample(s.data, s.ts))
         }
         rawServerRef.current = updated
         dirtyRef.current = true
       },
       onStatus: ({ connected }) => setWsConnected(connected),
       onTimeout: () => {
+        frozenAtRef.current = Date.now()
         wsTimedOutRef.current = true
         setWsTimedOut(true)
         stopSocket()
       },
     })
-  }, [apiIndex, configReady, privateRequired, serverId, stopSocket, turnstileRequired])
+  }, [apiIndex, configReady, indexValid, privateRequired, serverId, stopSocket, turnstileRequired])
 
   const continueLiveConnection = useCallback(() => {
+    frozenAtRef.current = null
     wsTimedOutRef.current = false
     setWsTimedOut(false)
     closedByUserRef.current = false
+    void loadDetailOnce()
     startSocket()
-  }, [startSocket])
+  }, [loadDetailOnce, startSocket])
 
   const closeLiveConnection = useCallback(() => {
+    frozenAtRef.current = frozenAtRef.current ?? Date.now()
     wsTimedOutRef.current = false
     setWsTimedOut(false)
     closedByUserRef.current = true
@@ -250,6 +275,7 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
       rawServerRef.current = null
       renderedOnlineRef.current = null
       dirtyRef.current = false
+      frozenAtRef.current = null
       pendingHistoryRowsRef.current = []
       hoursRef.current = 0.167
       lastLoadedHoursRef.current = 0.167
@@ -266,7 +292,17 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
 
   // Initial load + single-server WS; isolated from config object mutations such as saving themeOptions
   useEffect(() => {
-    if (!serverId || !configReady || turnstileRequired || privateRequired) return
+    if (!serverId || !configReady) return
+    if (!indexValid) {
+      setLoading(false)
+      setHistoryLoading(false)
+      setError(null)
+      setServer(null)
+      setRawServer(null)
+      setHistory([])
+      return
+    }
+    if (turnstileRequired || privateRequired) return
     if (!rawServerRef.current) {
       void loadDetailOnce()
       void loadHistory(hoursRef.current)
@@ -275,7 +311,7 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
 
     const flushTimer = window.setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return
-      if (rawServerRef.current) {
+      if (rawServerRef.current && frozenAtRef.current === null) {
         const expectedOnline = isCfsmServerOnline(rawServerRef.current, Date.now())
         if (dirtyRef.current || renderedOnlineRef.current !== expectedOnline) {
           dirtyRef.current = false
@@ -285,10 +321,7 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
       if (pendingHistoryRowsRef.current.length > 0) {
         const incoming = pendingHistoryRowsRef.current.splice(0)
         const cutoff = Date.now() - hoursRef.current * 3600 * 1000
-        setHistory((prev) => {
-          const merged = [...prev, ...incoming].filter((r) => normalizeTimestampMs(r.timestamp, 0) >= cutoff)
-          return merged.slice(-MAX_LIVE_HISTORY_POINTS)
-        })
+        setHistory((prev) => mergeHistoryRows(prev, incoming, cutoff))
       }
     }, 1000)
 
@@ -299,6 +332,7 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
   }, [
     apiIndex,
     configReady,
+    indexValid,
     loadDetailOnce,
     loadHistory,
     privateRequired,
@@ -314,14 +348,21 @@ export function useServerDetailData(serverId: string, apiIndex = 0) {
     const onVisibility = () => {
       if (document.hidden) {
         stopSocket()
-      } else if (!wsTimedOutRef.current && !closedByUserRef.current && configReady && !turnstileRequired && !privateRequired) {
+      } else if (
+        indexValid &&
+        !wsTimedOutRef.current &&
+        !closedByUserRef.current &&
+        configReady &&
+        !turnstileRequired &&
+        !privateRequired
+      ) {
         void loadDetailOnce()
         startSocket()
       }
     }
     document.addEventListener("visibilitychange", onVisibility)
     return () => document.removeEventListener("visibilitychange", onVisibility)
-  }, [configReady, loadDetailOnce, privateRequired, startSocket, stopSocket, turnstileRequired])
+  }, [configReady, indexValid, loadDetailOnce, privateRequired, startSocket, stopSocket, turnstileRequired])
 
   return {
     loading,

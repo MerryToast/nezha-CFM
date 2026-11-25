@@ -1,4 +1,5 @@
 import { useBackground } from "@/hooks/use-background"
+import { safeStorageGet } from "@/lib/safe-storage"
 import { cn } from "@/lib/utils"
 import { m } from "framer-motion"
 import { useEffect, useRef } from "react"
@@ -37,7 +38,7 @@ export default function GroupSwitch({
   }, [tabs])
 
   useEffect(() => {
-    const savedGroup = sessionStorage.getItem("selectedGroup")
+    const savedGroup = safeStorageGet("selectedGroup", "session")
     if (savedGroup && tabs.includes(savedGroup)) {
       setCurrentTab(savedGroup)
     }

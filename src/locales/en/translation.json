@@ -268,6 +268,7 @@
     "tbMode": "Show billing mode on traffic bar",
     "showAssetCard": "Show floating Asset Summary widget",
     "showVisitorCapsule": "Show bottom Visitor Info capsule",
+    "visitorCapsuleHint": "When enabled, visitor browsers query public GeoIP APIs (ipapi.co / api.ip.sb / ipwho.is) in fallback order to display visitor IP & region.",
     "assetColor": "Asset Widget Color",
     "capsuleColor": "Visitor Capsule Color",
     "assetCurrency": "Asset Default Currency",

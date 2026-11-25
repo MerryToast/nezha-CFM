@@ -1,3 +1,4 @@
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage"
 import { ReactNode, createContext, useCallback, useEffect, useState } from "react"
 
 export type Theme = "dark" | "light" | "system"
@@ -23,13 +24,9 @@ function isValidTheme(value: unknown): value is Theme {
 }
 
 function readStoredTheme(storageKey: string): { theme: Theme; hasStored: boolean } {
-  try {
-    const raw = localStorage.getItem(storageKey)
-    if (isValidTheme(raw)) {
-      return { theme: raw, hasStored: true }
-    }
-  } catch {
-    // ignore storage read error
+  const raw = safeStorageGet(storageKey, "local")
+  if (isValidTheme(raw)) {
+    return { theme: raw, hasStored: true }
   }
   return { theme: "system", hasStored: false }
 }
@@ -82,11 +79,7 @@ export function ThemeProvider({ children, storageKey = "vite-ui-theme" }: ThemeP
   const setTheme = useCallback(
     (nextTheme: Theme) => {
       const safeTheme: Theme = isValidTheme(nextTheme) ? nextTheme : "system"
-      try {
-        localStorage.setItem(storageKey, safeTheme)
-      } catch {
-        // ignore storage write error
-      }
+      safeStorageSet(storageKey, safeTheme, "local")
       setUserThemeState({ theme: safeTheme, hasStored: true })
     },
     [storageKey],

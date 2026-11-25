@@ -1,5 +1,6 @@
 import { useCfsm } from "@/hooks/use-cfsm"
 import { formatBytes } from "@/lib/format"
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage"
 import { ASSET_COLORS, resolveThemeColor } from "@/lib/theme-colors"
 import {
   calcTrafficUsed,
@@ -75,11 +76,7 @@ function getInitialCurrency(configuredRaw?: unknown): string {
   if (DISPLAY_CURRENCIES.includes(configured as (typeof DISPLAY_CURRENCIES)[number])) {
     return configured
   }
-  try {
-    return localStorage.getItem("asset_card_currency") || "CNY"
-  } catch {
-    return "CNY"
-  }
+  return safeStorageGet("asset_card_currency", "local") || "CNY"
 }
 
 function formatMoney(value: number | null, currency: string): string {
@@ -333,18 +330,10 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
     getInitialCurrency(themeOptions?.asset_card_default_currency),
   )
   const [sortBy, setSortBy] = useState<AssetSort>(() => {
-    try {
-      return (localStorage.getItem("asset_card_sort") as AssetSort) || "weight_asc"
-    } catch {
-      return "weight_asc"
-    }
+    return (safeStorageGet("asset_card_sort", "local") as AssetSort) || "weight_asc"
   })
   const [excludeFree, setExcludeFree] = useState(() => {
-    try {
-      return localStorage.getItem("asset_card_exclude_free") !== "false"
-    } catch {
-      return true
-    }
+    return safeStorageGet("asset_card_exclude_free", "local") !== "false"
   })
   const [tradeItem, setTradeItem] = useState<AssetItem | null>(null)
   const [tradeAmount, setTradeAmount] = useState("")
@@ -533,7 +522,7 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                 value={targetCurrency}
                 onChange={(event) => {
                   setTargetCurrency(event.target.value)
-                  localStorage.setItem("asset_card_currency", event.target.value)
+                  safeStorageSet("asset_card_currency", event.target.value, "local")
                 }}
               >
                 {DISPLAY_CURRENCIES.map((currency) => (
@@ -548,7 +537,7 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                 onChange={(event) => {
                   const nextSort = event.target.value as AssetSort
                   setSortBy(nextSort)
-                  localStorage.setItem("asset_card_sort", nextSort)
+                  safeStorageSet("asset_card_sort", nextSort, "local")
                 }}
               >
                 <option value="weight_asc">{t("assetWidget.sortWeightAsc", "权重 正序")}</option>
@@ -565,7 +554,7 @@ export default function AssetSummaryWidget({ now, servers }: AssetSummaryWidgetP
                 onClick={() => {
                   const nextValue = !excludeFree
                   setExcludeFree(nextValue)
-                  localStorage.setItem("asset_card_exclude_free", String(nextValue))
+                  safeStorageSet("asset_card_exclude_free", String(nextValue), "local")
                 }}
                 title={excludeFree ? t("assetWidget.excludingFree", "当前：已排除免费/白嫖") : t("assetWidget.includingFree", "当前：包含免费/白嫖")}
               >

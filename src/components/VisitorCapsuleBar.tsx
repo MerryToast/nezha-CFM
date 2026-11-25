@@ -1,5 +1,6 @@
 import ServerFlag from "@/components/ServerFlag"
 import { useCfsm } from "@/hooks/use-cfsm"
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage"
 import { CAPSULE_COLORS, resolveThemeColor } from "@/lib/theme-colors"
 import { cn } from "@/lib/utils"
 import { Globe2 } from "lucide-react"
@@ -19,7 +20,7 @@ const VISITOR_APIS = ["https://ipapi.co/json/", "https://api.ip.sb/geoip", "http
 
 function readSessionVisitorInfo(): VisitorInfo | null {
   try {
-    const raw = sessionStorage.getItem(VISITOR_SESSION_KEY)
+    const raw = safeStorageGet(VISITOR_SESSION_KEY, "session")
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<VisitorInfo>
     if (parsed && typeof parsed.ip === "string" && parsed.ip) {
@@ -38,7 +39,7 @@ function readSessionVisitorInfo(): VisitorInfo | null {
 
 function writeSessionVisitorInfo(info: VisitorInfo): void {
   try {
-    sessionStorage.setItem(VISITOR_SESSION_KEY, JSON.stringify(info))
+    safeStorageSet(VISITOR_SESSION_KEY, JSON.stringify(info), "session")
   } catch {
     // ignore storage errors
   }

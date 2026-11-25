@@ -32,7 +32,7 @@ interface ChannelMeta {
 
 interface ProbeTimelinePoint {
   created_at: number
-  [key: string]: number | null
+  [key: string]: number | string | null
 }
 
 interface NetworkChartProps {
@@ -96,7 +96,6 @@ export function NetworkChart({
 
   const [activeCharts, setActiveCharts] = useState<ProbeKey[]>([])
   const [isPeakEnabled, setIsPeakEnabled] = useState<boolean>(forcePeakCut)
-  const [liveRows, setLiveRows] = useState<CfsmHistoryRow[]>([])
 
   useEffect(() => {
     setIsPeakEnabled(forcePeakCut)
@@ -105,41 +104,8 @@ export function NetworkChart({
   const serverUid = server?.uid || server?.id || ""
 
   useEffect(() => {
-    setLiveRows([])
     setActiveCharts([])
   }, [serverUid])
-
-  useEffect(() => {
-    if (!server) return
-    const ts = server.sample_timestamp || server.last_updated || Date.now()
-    const snapshot: CfsmHistoryRow = {
-      timestamp: ts,
-      ping_ct: server.ping_ct,
-      ping_cu: server.ping_cu,
-      ping_cm: server.ping_cm,
-      ping_bd: server.ping_bd,
-      ping_node_1: server.ping_node_1,
-      ping_node_2: server.ping_node_2,
-      ping_node_3: server.ping_node_3,
-      ping_node_4: server.ping_node_4,
-      loss_ct: server.loss_ct,
-      loss_cu: server.loss_cu,
-      loss_cm: server.loss_cm,
-      loss_bd: server.loss_bd,
-      loss_node_1: server.loss_node_1,
-      loss_node_2: server.loss_node_2,
-      loss_node_3: server.loss_node_3,
-      loss_node_4: server.loss_node_4,
-    }
-    setLiveRows((prev) => {
-      const last = prev[prev.length - 1]
-      if (last && Math.abs(last.timestamp - ts) < 500) {
-        return [...prev.slice(0, -1), snapshot]
-      }
-      const next = [...prev, snapshot]
-      return next.length > 180 ? next.slice(next.length - 180) : next
-    })
-  }, [server, server?.sample_timestamp, server?.last_updated])
 
   const resolvedChannelLabel = useCallback(
     (key: ProbeKey): string => {
@@ -168,30 +134,64 @@ export function NetworkChart({
 
   const combinedRows = useMemo(() => {
     const byTs = new Map<number, CfsmHistoryRow>()
+    const cutoff = Date.now() - hours * 3600_000 - 60_000
+
     for (const row of history) {
       const ts = normalizeTimestampMs(row.timestamp ?? row.last_updated ?? row.last_time, 0)
-      if (ts > 0) byTs.set(ts, { ...row, timestamp: ts })
-    }
-    const latestHistoryTs = history.length > 0 ? normalizeTimestampMs(history[history.length - 1].timestamp, 0) : 0
-    for (const row of liveRows) {
-      if (row.timestamp > latestHistoryTs) {
-        byTs.set(row.timestamp, row)
+      if (ts <= 0) continue
+      if (hours > 0 && ts < cutoff) continue
+      const hasProbeObservation = PROBE_KEYS.some((key) => {
+        const p = normalizeProbeMetric(row[`ping_${key}` as keyof CfsmHistoryRow])
+        const l = normalizeProbeMetric(row[`loss_${key}` as keyof CfsmHistoryRow])
+        return !isDisabledProbeMetric(p) || !isDisabledProbeMetric(l)
+      })
+      if (hasProbeObservation) {
+        byTs.set(ts, { ...row, timestamp: ts })
       }
     }
-    const cutoff = Date.now() - hours * 3600_000 - 60_000
-    const sorted = Array.from(byTs.values())
-      .filter((r) => (hours > 0 ? r.timestamp >= cutoff || history.length === 0 : true))
-      .sort((a, b) => a.timestamp - b.timestamp)
+
+    if (byTs.size === 0 && server) {
+      const hasServerProbe = PROBE_KEYS.some((key) => {
+        const p = normalizeProbeMetric(server[`ping_${key}` as keyof NezhaServer])
+        const l = normalizeProbeMetric(server[`loss_${key}` as keyof NezhaServer])
+        return !isDisabledProbeMetric(p) || !isDisabledProbeMetric(l)
+      })
+      if (hasServerProbe) {
+        const ts = normalizeTimestampMs(server.last_updated, Date.now())
+        byTs.set(ts, {
+          timestamp: ts,
+          ping_ct: server.ping_ct,
+          ping_cu: server.ping_cu,
+          ping_cm: server.ping_cm,
+          ping_bd: server.ping_bd,
+          ping_node_1: server.ping_node_1,
+          ping_node_2: server.ping_node_2,
+          ping_node_3: server.ping_node_3,
+          ping_node_4: server.ping_node_4,
+          loss_ct: server.loss_ct,
+          loss_cu: server.loss_cu,
+          loss_cm: server.loss_cm,
+          loss_bd: server.loss_bd,
+          loss_node_1: server.loss_node_1,
+          loss_node_2: server.loss_node_2,
+          loss_node_3: server.loss_node_3,
+          loss_node_4: server.loss_node_4,
+        })
+      }
+    }
+
+    const sorted = Array.from(byTs.values()).sort((a, b) => a.timestamp - b.timestamp)
     if (sorted.length > 600) {
       const step = Math.ceil(sorted.length / 600)
       return sorted.filter((_, idx) => idx % step === 0 || idx === sorted.length - 1)
     }
     return sorted
-  }, [history, liveRows, hours])
+  }, [history, server, hours])
 
   const channels = useMemo<ChannelMeta[]>(() => {
     const result: ChannelMeta[] = []
     let colorIdx = 0
+    const latestRowTs = combinedRows.length > 0 ? combinedRows[combinedRows.length - 1].timestamp : 0
 
     for (const key of PROBE_KEYS) {
       const pingField = `ping_${key}` as keyof CfsmHistoryRow
@@ -210,15 +210,16 @@ export function NetworkChart({
           anyEnabled = true
           latestPing = p
         }
+        // Only finite numeric loss observations (0..100) count toward avgLoss; loss=null means no sample
         const l = normalizeProbeMetric(row[lossField])
         if (typeof l === "number") {
           lossSum += l
           lossCount += 1
-        } else if (l === null) {
-          // Probe timeout contributes 100% loss sample if recorded as null
-          lossSum += 100
-          lossCount += 1
         }
+      }
+
+      if (!isDisabledProbeMetric(serverPing) && (server?.last_updated ?? 0) >= latestRowTs) {
+        latestPing = serverPing
       }
 
       if (!anyEnabled) continue
@@ -248,8 +249,9 @@ export function NetworkChart({
         const rawLoss = normalizeProbeMetric(row[`loss_${ch.key}` as keyof CfsmHistoryRow])
 
         item[ch.key] = typeof rawPing === "number" ? rawPing : null
-        item[`loss_${ch.key}`] =
-          typeof rawLoss === "number" ? rawLoss : rawPing === null ? 100 : null
+        item[`state_${ch.key}`] =
+          typeof rawPing === "number" ? "ok" : rawPing === null ? "timeout" : "unsampled"
+        item[`loss_${ch.key}`] = typeof rawLoss === "number" ? rawLoss : null
       }
       return item
     })
@@ -476,6 +478,7 @@ export function NetworkChart({
                       <div className="font-medium text-foreground">{formatTime(row.created_at)}</div>
                       {selectedChannels.map((ch) => {
                         const pingVal = row[ch.key]
+                        const pingState = row[`state_${ch.key}`]
                         const lossVal = row[`loss_${ch.key}`]
                         return (
                           <div key={ch.key} className="flex items-center justify-between gap-4">
@@ -487,14 +490,14 @@ export function NetworkChart({
                               {ch.label}
                             </span>
                             <span className="font-medium text-foreground">
-                              {pingVal === null ? (
+                              {pingState === "timeout" ? (
                                 <span className="text-rose-500">{t("monitor.timeout", "Timeout")}</span>
+                              ) : pingState === "unsampled" || pingVal === null || pingVal === undefined ? (
+                                <span className="text-muted-foreground">--</span>
                               ) : (
                                 `${Number(pingVal).toFixed(1)}ms`
                               )}
-                              {lossVal !== null && lossVal !== undefined
-                                ? ` (${Number(lossVal).toFixed(1)}%)`
-                                : ""}
+                              {typeof lossVal === "number" ? ` (${Number(lossVal).toFixed(1)}%)` : ""}
                             </span>
                           </div>
                         )

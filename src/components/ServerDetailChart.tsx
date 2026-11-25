@@ -19,7 +19,7 @@ import { CfsmHistoryRow, DiskIoMetrics, GpuDeviceInfo } from "@/types/cfsm"
 import { NezhaServer } from "@/types/nezha-api"
 import dayjs from "dayjs"
 import { Lock } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { Area, AreaChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 
@@ -36,18 +36,18 @@ interface ServerDetailChartProps {
 
 interface ChartPoint {
   ts: number
-  cpu: number
-  mem: number
-  swap: number
-  diskUsage: number
-  uploadSpeed: number
-  downloadSpeed: number
-  tcp: number
-  udp: number
-  process: number
-  load1: number
-  load5: number
-  load15: number
+  cpu: number | null
+  mem: number | null
+  swap: number | null
+  diskUsage: number | null
+  uploadSpeed: number | null
+  downloadSpeed: number | null
+  tcp: number | null
+  udp: number | null
+  process: number | null
+  load1: number | null
+  load5: number | null
+  load15: number | null
   diskIo: DiskIoMetrics | null
   gpus: GpuDeviceInfo[]
 }
@@ -60,38 +60,49 @@ const CHART_SERIES_COLORS = [
   "hsl(var(--chart-5))",
 ]
 
+function hasRawMetric(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== ""
+}
+
 function historyRowToPoint(row: CfsmHistoryRow, fallbackServer: NezhaServer | null): ChartPoint | null {
   const ts = normalizeTimestampMs(row.timestamp ?? row.last_updated ?? row.last_time, 0)
   if (!ts) return null
 
   const memTotal =
     parseMemoryOrDiskToBytes(row.ram_total) || fallbackServer?.host.mem_total || 0
-  const memUsed = parseMemoryOrDiskToBytes(row.ram_used)
+  const hasMem = hasRawMetric(row.ram_used)
+  const memUsed = hasMem ? parseMemoryOrDiskToBytes(row.ram_used) : 0
+
   const swapTotal =
     parseMemoryOrDiskToBytes(row.swap_total) || fallbackServer?.host.swap_total || 0
-  const swapUsed = parseMemoryOrDiskToBytes(row.swap_used)
+  const hasSwap = hasRawMetric(row.swap_used)
+  const swapUsed = hasSwap ? parseMemoryOrDiskToBytes(row.swap_used) : 0
+
   const diskTotal =
     parseMemoryOrDiskToBytes(row.disk_total) || fallbackServer?.host.disk_total || 0
-  const diskUsed = parseMemoryOrDiskToBytes(row.disk_used)
+  const hasDisk = hasRawMetric(row.disk_used)
+  const diskUsed = hasDisk ? parseMemoryOrDiskToBytes(row.disk_used) : 0
 
-  const [load1, load5, load15] = parseLoadAvg(row.load_avg ?? row.load)
+  const rawLoad = row.load_avg ?? row.load
+  const hasLoad = hasRawMetric(rawLoad)
+  const [load1, load5, load15] = hasLoad ? parseLoadAvg(rawLoad) : [0, 0, 0]
   const diskIo = isValidDiskIo(row.disk) ? row.disk : null
   const gpus = parseGpuInfo(row.gpu_info)
 
   return {
     ts,
-    cpu: Math.max(0, Math.min(100, parseFiniteNumber(row.cpu, 0))),
-    mem: memTotal > 0 ? Math.max(0, Math.min(100, (memUsed / memTotal) * 100)) : 0,
-    swap: swapTotal > 0 ? Math.max(0, Math.min(100, (swapUsed / swapTotal) * 100)) : 0,
-    diskUsage: diskTotal > 0 ? Math.max(0, Math.min(100, (diskUsed / diskTotal) * 100)) : 0,
-    uploadSpeed: Math.max(0, parseFiniteNumber(row.net_out_speed, 0)),
-    downloadSpeed: Math.max(0, parseFiniteNumber(row.net_in_speed, 0)),
-    tcp: Math.max(0, Math.round(parseFiniteNumber(row.tcp_conn, 0))),
-    udp: Math.max(0, Math.round(parseFiniteNumber(row.udp_conn, 0))),
-    process: Math.max(0, Math.round(parseFiniteNumber(row.processes, 0))),
-    load1,
-    load5,
-    load15,
+    cpu: hasRawMetric(row.cpu) ? Math.max(0, Math.min(100, parseFiniteNumber(row.cpu, 0))) : null,
+    mem: hasMem && memTotal > 0 ? Math.max(0, Math.min(100, (memUsed / memTotal) * 100)) : null,
+    swap: hasSwap && swapTotal > 0 ? Math.max(0, Math.min(100, (swapUsed / swapTotal) * 100)) : null,
+    diskUsage: hasDisk && diskTotal > 0 ? Math.max(0, Math.min(100, (diskUsed / diskTotal) * 100)) : null,
+    uploadSpeed: hasRawMetric(row.net_out_speed) ? Math.max(0, parseFiniteNumber(row.net_out_speed, 0)) : null,
+    downloadSpeed: hasRawMetric(row.net_in_speed) ? Math.max(0, parseFiniteNumber(row.net_in_speed, 0)) : null,
+    tcp: hasRawMetric(row.tcp_conn) ? Math.max(0, Math.round(parseFiniteNumber(row.tcp_conn, 0))) : null,
+    udp: hasRawMetric(row.udp_conn) ? Math.max(0, Math.round(parseFiniteNumber(row.udp_conn, 0))) : null,
+    process: hasRawMetric(row.processes) ? Math.max(0, Math.round(parseFiniteNumber(row.processes, 0))) : null,
+    load1: hasLoad ? load1 : null,
+    load5: hasLoad ? load5 : null,
+    load15: hasLoad ? load15 : null,
     diskIo,
     gpus,
   }
@@ -137,28 +148,6 @@ export default function ServerDetailChart({
 }: ServerDetailChartProps) {
   const { t } = useTranslation()
   const { hasActiveBackground: customBackgroundImage } = useBackground()
-  const [livePoints, setLivePoints] = useState<ChartPoint[]>([])
-
-  const serverUid = server?.uid || server?.id || ""
-
-  // Reset live session buffer when switching nodes (including same ID across different apiIndex backends)
-  useEffect(() => {
-    setLivePoints([])
-  }, [serverUid])
-
-  // Append live WebSocket ticks smoothly without extra polling
-  useEffect(() => {
-    if (!server) return
-    const point = serverToPoint(now, server)
-    setLivePoints((prev) => {
-      const last = prev[prev.length - 1]
-      if (last && Math.abs(point.ts - last.ts) < 500) {
-        return [...prev.slice(0, -1), point]
-      }
-      const next = [...prev, point]
-      return next.length > 240 ? next.slice(next.length - 240) : next
-    })
-  }, [server, server?.sample_timestamp, server?.last_updated, now])
 
   const mergedPoints = useMemo<ChartPoint[]>(() => {
     const byTs = new Map<number, ChartPoint>()
@@ -168,14 +157,9 @@ export default function ServerDetailChart({
       if (pt) byTs.set(pt.ts, pt)
     }
 
-    const latestHistoryTs = history.length > 0
-      ? normalizeTimestampMs(history[history.length - 1].timestamp, 0)
-      : 0
-
-    for (const pt of livePoints) {
-      if (pt.ts > latestHistoryTs) {
-        byTs.set(pt.ts, pt)
-      }
+    if (byTs.size === 0 && server) {
+      const pt = serverToPoint(now, server)
+      byTs.set(pt.ts, pt)
     }
 
     const cutoff = Date.now() - hours * 3600_000 - 60_000
@@ -188,7 +172,30 @@ export default function ServerDetailChart({
       return sorted.filter((_, idx) => idx % step === 0 || idx === sorted.length - 1)
     }
     return sorted
-  }, [history, livePoints, server, hours])
+  }, [history, server, now, hours])
+
+  const cpuPoints = useMemo(() => mergedPoints.filter((pt) => pt.cpu !== null), [mergedPoints])
+  const memPoints = useMemo(() => mergedPoints.filter((pt) => pt.mem !== null || pt.swap !== null), [mergedPoints])
+  const diskPoints = useMemo(() => mergedPoints.filter((pt) => pt.diskUsage !== null), [mergedPoints])
+  const netPoints = useMemo(
+    () => mergedPoints.filter((pt) => pt.uploadSpeed !== null || pt.downloadSpeed !== null),
+    [mergedPoints],
+  )
+  const connPoints = useMemo(() => mergedPoints.filter((pt) => pt.tcp !== null || pt.udp !== null), [mergedPoints])
+  const procPoints = useMemo(() => mergedPoints.filter((pt) => pt.process !== null), [mergedPoints])
+  const loadPoints = useMemo(() => mergedPoints.filter((pt) => pt.load1 !== null), [mergedPoints])
+  const diskIoPoints = useMemo(
+    () =>
+      mergedPoints
+        .filter((pt) => pt.diskIo !== null)
+        .map((pt) => ({
+          ...pt,
+          readBps: pt.diskIo!.read_bps,
+          writeBps: pt.diskIo!.write_bps,
+        })),
+    [mergedPoints],
+  )
+  const gpuPoints = useMemo(() => mergedPoints.filter((pt) => pt.gpus.length > 0), [mergedPoints])
 
   const gpuCatalog = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>()
@@ -274,7 +281,7 @@ export default function ServerDetailChart({
           }
         >
           <ChartContainer config={{ cpu: { label: "CPU" } } satisfies ChartConfig} className="aspect-auto h-[130px] w-full">
-            <AreaChart accessibilityLayer data={mergedPoints} margin={{ top: 12, left: 12, right: 12 }}>
+            <AreaChart accessibilityLayer data={cpuPoints} margin={{ top: 12, left: 12, right: 12 }}>
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="ts"
@@ -291,7 +298,7 @@ export default function ServerDetailChart({
                   const pt = payload[0].payload as ChartPoint
                   return (
                     <TooltipBox title={formatTime(pt.ts)}>
-                      <div>CPU: {pt.cpu.toFixed(2)}%</div>
+                      <div>CPU: {(pt.cpu ?? 0).toFixed(2)}%</div>
                     </TooltipBox>
                   )
                 }}
@@ -327,7 +334,7 @@ export default function ServerDetailChart({
             config={{ mem: { label: "Mem" }, swap: { label: "Swap" } } satisfies ChartConfig}
             className="aspect-auto h-[130px] w-full"
           >
-            <AreaChart accessibilityLayer data={mergedPoints} margin={{ top: 12, left: 12, right: 12 }}>
+            <AreaChart accessibilityLayer data={memPoints} margin={{ top: 12, left: 12, right: 12 }}>
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="ts"
@@ -344,8 +351,8 @@ export default function ServerDetailChart({
                   const pt = payload[0].payload as ChartPoint
                   return (
                     <TooltipBox title={formatTime(pt.ts)}>
-                      <div>RAM: {pt.mem.toFixed(1)}%</div>
-                      {server.host.swap_total > 0 && <div>Swap: {pt.swap.toFixed(1)}%</div>}
+                      {pt.mem !== null && <div>RAM: {pt.mem.toFixed(1)}%</div>}
+                      {server.host.swap_total > 0 && pt.swap !== null && <div>Swap: {pt.swap.toFixed(1)}%</div>}
                     </TooltipBox>
                   )
                 }}
@@ -381,7 +388,7 @@ export default function ServerDetailChart({
           }
         >
           <ChartContainer config={{ diskUsage: { label: "Disk" } } satisfies ChartConfig} className="aspect-auto h-[130px] w-full">
-            <AreaChart accessibilityLayer data={mergedPoints} margin={{ top: 12, left: 12, right: 12 }}>
+            <AreaChart accessibilityLayer data={diskPoints} margin={{ top: 12, left: 12, right: 12 }}>
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="ts"
@@ -398,7 +405,7 @@ export default function ServerDetailChart({
                   const pt = payload[0].payload as ChartPoint
                   return (
                     <TooltipBox title={formatTime(pt.ts)}>
-                      <div>Disk: {pt.diskUsage.toFixed(1)}%</div>
+                      <div>Disk: {(pt.diskUsage ?? 0).toFixed(1)}%</div>
                     </TooltipBox>
                   )
                 }}
@@ -433,7 +440,7 @@ export default function ServerDetailChart({
             config={{ uploadSpeed: { label: "Upload" }, downloadSpeed: { label: "Download" } } satisfies ChartConfig}
             className="aspect-auto h-[130px] w-full"
           >
-            <LineChart accessibilityLayer data={mergedPoints} margin={{ top: 12, left: 12, right: 12 }}>
+            <LineChart accessibilityLayer data={netPoints} margin={{ top: 12, left: 12, right: 12 }}>
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="ts"
@@ -456,8 +463,8 @@ export default function ServerDetailChart({
                   const pt = payload[0].payload as ChartPoint
                   return (
                     <TooltipBox title={formatTime(pt.ts)}>
-                      <div>↑ {formatBytes(pt.uploadSpeed)}/s</div>
-                      <div>↓ {formatBytes(pt.downloadSpeed)}/s</div>
+                      <div>↑ {formatBytes(pt.uploadSpeed ?? 0)}/s</div>
+                      <div>↓ {formatBytes(pt.downloadSpeed ?? 0)}/s</div>
                     </TooltipBox>
                   )
                 }}
@@ -489,7 +496,7 @@ export default function ServerDetailChart({
             config={{ tcp: { label: "TCP" }, udp: { label: "UDP" } } satisfies ChartConfig}
             className="aspect-auto h-[130px] w-full"
           >
-            <LineChart accessibilityLayer data={mergedPoints} margin={{ top: 12, left: 12, right: 12 }}>
+            <LineChart accessibilityLayer data={connPoints} margin={{ top: 12, left: 12, right: 12 }}>
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="ts"
@@ -506,8 +513,8 @@ export default function ServerDetailChart({
                   const pt = payload[0].payload as ChartPoint
                   return (
                     <TooltipBox title={formatTime(pt.ts)}>
-                      <div>TCP: {pt.tcp}</div>
-                      <div>UDP: {pt.udp}</div>
+                      {pt.tcp !== null && <div>TCP: {pt.tcp}</div>}
+                      {pt.udp !== null && <div>UDP: {pt.udp}</div>}
                     </TooltipBox>
                   )
                 }}
@@ -525,7 +532,7 @@ export default function ServerDetailChart({
           rightContent={<p className="text-xs font-medium tabular-nums">{currentInfo.process}</p>}
         >
           <ChartContainer config={{ process: { label: "Process" } } satisfies ChartConfig} className="aspect-auto h-[130px] w-full">
-            <AreaChart accessibilityLayer data={mergedPoints} margin={{ top: 12, left: 12, right: 12 }}>
+            <AreaChart accessibilityLayer data={procPoints} margin={{ top: 12, left: 12, right: 12 }}>
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="ts"
@@ -542,7 +549,7 @@ export default function ServerDetailChart({
                   const pt = payload[0].payload as ChartPoint
                   return (
                     <TooltipBox title={formatTime(pt.ts)}>
-                      <div>{t("serverDetailChart.process")}: {pt.process}</div>
+                      <div>{t("serverDetailChart.process")}: {pt.process ?? 0}</div>
                     </TooltipBox>
                   )
                 }}
@@ -566,7 +573,7 @@ export default function ServerDetailChart({
             config={{ load1: { label: "1m" }, load5: { label: "5m" }, load15: { label: "15m" } } satisfies ChartConfig}
             className="aspect-auto h-[130px] w-full"
           >
-            <LineChart accessibilityLayer data={mergedPoints} margin={{ top: 12, left: 12, right: 12 }}>
+            <LineChart accessibilityLayer data={loadPoints} margin={{ top: 12, left: 12, right: 12 }}>
               <CartesianGrid vertical={false} />
               <XAxis
                 dataKey="ts"
@@ -583,9 +590,9 @@ export default function ServerDetailChart({
                   const pt = payload[0].payload as ChartPoint
                   return (
                     <TooltipBox title={formatTime(pt.ts)}>
-                      <div>1m: {pt.load1.toFixed(2)}</div>
-                      <div>5m: {pt.load5.toFixed(2)}</div>
-                      <div>15m: {pt.load15.toFixed(2)}</div>
+                      <div>1m: {(pt.load1 ?? 0).toFixed(2)}</div>
+                      <div>5m: {(pt.load5 ?? 0).toFixed(2)}</div>
+                      <div>15m: {(pt.load15 ?? 0).toFixed(2)}</div>
                     </TooltipBox>
                   )
                 }}
@@ -623,11 +630,7 @@ export default function ServerDetailChart({
             >
               <LineChart
                 accessibilityLayer
-                data={mergedPoints.map((pt) => ({
-                  ...pt,
-                  readBps: pt.diskIo?.read_bps ?? 0,
-                  writeBps: pt.diskIo?.write_bps ?? 0,
-                }))}
+                data={diskIoPoints}
                 margin={{ top: 12, left: 12, right: 12 }}
               >
                 <CartesianGrid vertical={false} />
@@ -687,7 +690,7 @@ export default function ServerDetailChart({
             >
               <LineChart
                 accessibilityLayer
-                data={mergedPoints.map((pt) => {
+                data={gpuPoints.map((pt) => {
                   const row: Record<string, number | null> = { ts: pt.ts }
                   gpuCatalog.forEach((gpu, idx) => {
                     const match = pt.gpus.find((item, itemIdx) => String(item.id ?? itemIdx) === gpu.id)

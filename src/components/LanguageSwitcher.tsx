@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useCfsm } from "@/hooks/use-cfsm"
+import { safeStorageSet } from "@/lib/safe-storage"
 import { cn } from "@/lib/utils"
 import { CheckCircleIcon, LanguageIcon } from "@heroicons/react/20/solid"
 import { useTranslation } from "react-i18next"
@@ -21,7 +22,7 @@ export function LanguageSwitcher() {
 
   const handleSelect = (e: Event, newLocale: string) => {
     e.preventDefault()
-    localStorage.setItem("language", newLocale)
+    safeStorageSet("language", newLocale, "local")
     i18n.changeLanguage(newLocale)
   }
 

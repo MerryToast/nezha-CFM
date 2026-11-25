@@ -15,6 +15,7 @@ import { useBackground } from "@/hooks/use-background"
 import { useCfsm } from "@/hooks/use-cfsm"
 import { useSort } from "@/hooks/use-sort"
 import { useStatus } from "@/hooks/use-status"
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage"
 import { cn } from "@/lib/utils"
 import {
   ArrowDownIcon,
@@ -51,11 +52,7 @@ export default function Servers() {
   const scrollRestoredRef = useRef(false)
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false)
   const [currentGroup, setCurrentGroup] = useState<string>(() => {
-    try {
-      return sessionStorage.getItem("selectedGroup") || "All"
-    } catch {
-      return "All"
-    }
+    return safeStorageGet("selectedGroup", "session") || "All"
   })
 
   useEffect(() => {
@@ -72,15 +69,11 @@ export default function Servers() {
 
   const handleTagChange = (newGroup: string) => {
     setCurrentGroup(newGroup)
-    try {
-      sessionStorage.setItem("selectedGroup", newGroup)
-    } catch {
-      // ignore storage errors
-    }
+    safeStorageSet("selectedGroup", newGroup, "session")
   }
 
   useEffect(() => {
-    const showServicesState = localStorage.getItem("showServices")
+    const showServicesState = safeStorageGet("showServices", "local")
     if (themeOptions?.force_show_services === true || win.ForceShowServices) {
       setShowServices("1")
     } else if (showServicesState !== null) {
@@ -97,7 +90,7 @@ export default function Servers() {
         setInline("0")
         return
       }
-      const inlineState = localStorage.getItem("inline")
+      const inlineState = safeStorageGet("inline", "local")
       if (themeOptions?.force_card_inline === true || win.ForceCardInline) {
         setInline("1")
       } else if (inlineState !== null) {
@@ -115,7 +108,7 @@ export default function Servers() {
   }, [themeOptions?.force_card_inline, win.ForceCardInline])
 
   useEffect(() => {
-    const showMapState = localStorage.getItem("showMap")
+    const showMapState = safeStorageGet("showMap", "local")
     if (themeOptions?.force_show_map === true || win.ForceShowMap) {
       setShowMap("1")
     } else if (showMapState !== null) {
@@ -128,12 +121,7 @@ export default function Servers() {
   useEffect(() => {
     if (scrollRestoredRef.current || servers.length === 0) return
     scrollRestoredRef.current = true
-    let savedPosition = 0
-    try {
-      savedPosition = Number(sessionStorage.getItem("scrollPosition") || "0")
-    } catch {
-      savedPosition = 0
-    }
+    const savedPosition = Number(safeStorageGet("scrollPosition", "session") || "0")
     if (Number.isFinite(savedPosition) && savedPosition > 0) {
       requestAnimationFrame(() => {
         window.scrollTo({ top: savedPosition, behavior: "instant" })
@@ -170,7 +158,7 @@ export default function Servers() {
   useEffect(() => {
     if (currentGroup !== "All" && servers.length > 0 && !groupTabs.includes(currentGroup)) {
       setCurrentGroup("All")
-      sessionStorage.setItem("selectedGroup", "All")
+      safeStorageSet("selectedGroup", "All", "session")
     }
   }, [currentGroup, groupTabs, servers.length])
 
@@ -340,7 +328,7 @@ export default function Servers() {
             onClick={() => {
               const next = showMap === "0" ? "1" : "0"
               setShowMap(next)
-              localStorage.setItem("showMap", next)
+              safeStorageSet("showMap", next, "local")
             }}
             className={cn(
               "rounded-[50px] bg-white dark:bg-stone-800 cursor-pointer p-[10px] transition-all border dark:border-none border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]",
@@ -365,7 +353,7 @@ export default function Servers() {
             onClick={() => {
               const next = showServices === "0" ? "1" : "0"
               setShowServices(next)
-              localStorage.setItem("showServices", next)
+              safeStorageSet("showServices", next, "local")
             }}
             className={cn(
               "rounded-[50px] bg-white dark:bg-stone-800 cursor-pointer p-[10px] transition-all border dark:border-none border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]",
@@ -390,7 +378,7 @@ export default function Servers() {
             onClick={() => {
               const next = inline === "0" ? "1" : "0"
               setInline(next)
-              localStorage.setItem("inline", next)
+              safeStorageSet("inline", next, "local")
             }}
             className={cn(
               "rounded-[50px] bg-white dark:bg-stone-800 cursor-pointer p-[10px] transition-all border dark:border-none border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.2)]",
